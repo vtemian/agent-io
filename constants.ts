@@ -17,9 +17,4 @@ export const DEFAULT_SOURCE_LABEL = "mock";
 export const POLLING_BACKOFF_MULTIPLIER = 2;
 export const POLLING_MAX_BACKOFF_MS = 10_000;
 
-export const STATUS_CYCLE: readonly AgentStatus[] = [
-  "running",
-  "idle",
-  "completed",
-  "error",
-];
+export const STATUS_CYCLE: readonly AgentStatus[] = ["running", "idle", "completed", "error"];
