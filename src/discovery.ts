@@ -1,5 +1,6 @@
 import { readdirSync, statSync, type Dirent, type Stats } from "node:fs";
 import { homedir } from "node:os";
+import uniq from "lodash.uniq";
 import path from "node:path";
 
 export interface TranscriptDiscoveryOptions {
@@ -83,16 +84,5 @@ function collectJsonlFilesRecursive(directory: string): string[] {
 }
 
 function dedupePaths(paths: readonly string[]): string[] {
-  const seen = new Set<string>();
-  const unique: string[] = [];
-
-  for (const entry of paths) {
-    if (seen.has(entry)) {
-      continue;
-    }
-    seen.add(entry);
-    unique.push(entry);
-  }
-
-  return unique;
+  return uniq(paths);
 }
