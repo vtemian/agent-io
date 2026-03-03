@@ -53,7 +53,15 @@ export interface AgentUpdatedEvent {
   snapshot: AgentStateSnapshot;
 }
 
+export interface AgentSnapshotEvent {
+  type: typeof AGENT_SUBSCRIPTION_EVENT_TYPES.snapshot;
+  at: number;
+  snapshot: AgentStateSnapshot;
+  agent: AgentSnapshot | undefined;
+}
+
 export type AgentSubscriptionEvent =
+  | AgentSnapshotEvent
   | AgentUpdatedEvent
   | {
       type: typeof AGENT_SUBSCRIPTION_EVENT_TYPES.errored;
@@ -79,6 +87,7 @@ export interface AgentSubscription {
   getLatestSnapshot(): AgentStateSnapshot | undefined;
   subscribe(listener: (event: AgentSubscriptionEvent) => void): () => void;
   subscribeToAgentChanges(listener: (event: AgentUpdatedEvent) => void): () => void;
+  subscribeToSnapshots(listener: (event: AgentSnapshotEvent) => void): () => void;
 }
 
 export function createAgentSubscription(options: AgentSubscriptionOptions): AgentSubscription {
@@ -131,6 +140,12 @@ export function createAgentSubscription(options: AgentSubscriptionOptions): Agen
         agents: event.snapshot.agents,
         health: event.snapshot.health,
       };
+      emit({
+        type: AGENT_SUBSCRIPTION_EVENT_TYPES.snapshot,
+        at: event.at,
+        snapshot: latestSnapshot,
+        agent: undefined,
+      });
       return;
     }
 
@@ -188,6 +203,14 @@ export function createAgentSubscription(options: AgentSubscriptionOptions): Agen
     });
   }
 
+  function subscribeToSnapshots(listener: (event: AgentSnapshotEvent) => void): () => void {
+    return subscribe((event) => {
+      if (event.type === AGENT_SUBSCRIPTION_EVENT_TYPES.snapshot) {
+        listener(event);
+      }
+    });
+  }
+
   async function refreshNow(): Promise<AgentStateSnapshot> {
     const snapshot = await runtime.refreshNow();
     if (latestSnapshot) {
@@ -202,7 +225,11 @@ export function createAgentSubscription(options: AgentSubscriptionOptions): Agen
 
   function emit(event: AgentSubscriptionEvent): void {
     for (const listener of listeners) {
-      listener(event);
+      try {
+        listener(event);
+      } catch {
+        // Keep subscription fan-out resilient to listener failures.
+      }
     }
   }
 
@@ -213,6 +240,7 @@ export function createAgentSubscription(options: AgentSubscriptionOptions): Agen
     getLatestSnapshot: () => latestSnapshot,
     subscribe,
     subscribeToAgentChanges,
+    subscribeToSnapshots,
   };
 }
 

@@ -1,9 +1,11 @@
 import { createLifecycleMapper } from "./lifecycle";
 import type { WatchRuntime, WatchRuntimeEvent, WatchRuntimeOptions, WatchSnapshot } from "./types";
 import {
+  WATCH_RUNTIME_ERROR_CODES,
   WATCH_RUNTIME_ERROR_MESSAGES,
   WATCH_RUNTIME_EVENT_TYPES,
   WATCH_RUNTIME_STATES,
+  WatchRuntimeError,
 } from "./types";
 
 const DEFAULT_DEBOUNCE_MS = 150;
@@ -33,44 +35,86 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
   const listeners = new Set<(event: WatchRuntimeEvent<TAgent, TStatus>) => void>();
   const subscriptions: ChangeSubscription[] = [];
 
-  let running = false;
+  let state: "stopped" | "starting" | "started" | "stopping" = "stopped";
+  let lifecycleToken = 0;
   let pendingRefresh = false;
   let refreshLoop: Promise<void> | null = null;
   let debounceTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
   let queuedWaiters: RefreshWaiter<TAgent>[] = [];
+  let startPromise: Promise<void> | null = null;
+  let stopPromise: Promise<void> | null = null;
 
   async function start(): Promise<void> {
-    if (running) {
+    if (state === "started") {
       return;
     }
+    if (state === "starting" && startPromise) {
+      return startPromise;
+    }
+    if (state === "stopping" && stopPromise) {
+      await stopPromise;
+    }
 
-    running = true;
+    state = "starting";
+    const token = ++lifecycleToken;
+    const operation = (async () => {
+      try {
+        await source.connect?.();
+        if (token !== lifecycleToken || state !== "starting") {
+          await disconnectQuietly(source);
+          return;
+        }
+
+        initializeSubscriptions();
+        state = "started";
+        emit({
+          type: WATCH_RUNTIME_EVENT_TYPES.state,
+          at: now(),
+          state: WATCH_RUNTIME_STATES.started,
+        });
+        queueRefresh();
+      } catch (error) {
+        if (token === lifecycleToken) {
+          state = "stopped";
+          clearDebounceTimer();
+          closeSubscriptions();
+          lifecycle.reset();
+          rejectAllQueuedWaiters(error);
+        }
+        await disconnectQuietly(source);
+        throw error;
+      }
+    })();
+    startPromise = operation;
     try {
-      await source.connect?.();
-      initializeSubscriptions();
-      emit({
-        type: WATCH_RUNTIME_EVENT_TYPES.state,
-        at: now(),
-        state: WATCH_RUNTIME_STATES.started,
-      });
-      queueRefresh();
-    } catch (error) {
-      running = false;
-      clearDebounceTimer();
-      closeSubscriptions();
-      lifecycle.reset();
-      rejectAllQueuedWaiters(error);
-      await disconnectQuietly(source);
-      throw error;
+      await operation;
+    } finally {
+      if (startPromise === operation) {
+        startPromise = null;
+      }
     }
   }
 
   async function stop(): Promise<void> {
-    if (!running) {
+    if (state === "stopped") {
       return;
     }
+    if (state === "stopping" && stopPromise) {
+      return stopPromise;
+    }
+    if (state === "starting" && startPromise) {
+      try {
+        await startPromise;
+      } catch {
+        // Continue stopping after failed start.
+      }
+      if (state === "stopped") {
+        return;
+      }
+    }
 
-    running = false;
+    state = "stopping";
+    const token = ++lifecycleToken;
     clearDebounceTimer();
     closeSubscriptions();
     lifecycle.reset();
@@ -78,19 +122,33 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
     const stoppedError = createStoppedError();
     rejectAllQueuedWaiters(stoppedError);
 
+    const operation = (async () => {
+      try {
+        await source.disconnect?.();
+      } finally {
+        if (token !== lifecycleToken) {
+          return;
+        }
+        state = "stopped";
+        emit({
+          type: WATCH_RUNTIME_EVENT_TYPES.state,
+          at: now(),
+          state: WATCH_RUNTIME_STATES.stopped,
+        });
+      }
+    })();
+    stopPromise = operation;
     try {
-      await source.disconnect?.();
+      await operation;
     } finally {
-      emit({
-        type: WATCH_RUNTIME_EVENT_TYPES.state,
-        at: now(),
-        state: WATCH_RUNTIME_STATES.stopped,
-      });
+      if (stopPromise === operation) {
+        stopPromise = null;
+      }
     }
   }
 
   function refreshNow(): Promise<WatchSnapshot<TAgent>> {
-    if (!running) {
+    if (state !== "started") {
       return Promise.reject(createNotRunningError());
     }
 
@@ -108,7 +166,7 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
   }
 
   function queueRefresh(): void {
-    if (!running) {
+    if (state !== "started") {
       return;
     }
 
@@ -124,7 +182,7 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
   }
 
   async function runWorker(): Promise<void> {
-    while (running && pendingRefresh) {
+    while (state === "started" && pendingRefresh) {
       pendingRefresh = false;
       const waitersForCycle = queuedWaiters;
       queuedWaiters = [];
@@ -132,7 +190,7 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
     }
 
     refreshLoop = null;
-    if (running && pendingRefresh) {
+    if (state === "started" && pendingRefresh) {
       ensureWorker();
     }
   }
@@ -142,7 +200,7 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
       const at = now();
       const snapshot = await source.readSnapshot(at);
 
-      if (!running) {
+      if (state !== "started") {
         rejectWaiters(waitersForCycle, createStoppedError());
         return;
       }
@@ -161,7 +219,7 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
 
       resolveWaiters(waitersForCycle, snapshot);
     } catch (error) {
-      if (!running) {
+      if (state !== "started") {
         rejectWaiters(waitersForCycle, createStoppedError());
         return;
       }
@@ -192,7 +250,7 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
   }
 
   function onWatchedEvent(): void {
-    if (!running) {
+    if (state !== "started") {
       return;
     }
 
@@ -236,7 +294,11 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
 
   function emit(event: WatchRuntimeEvent<TAgent, TStatus>): void {
     for (const listener of listeners) {
-      listener(event);
+      try {
+        listener(event);
+      } catch {
+        // Keep runtime loop healthy even if consumer listeners throw.
+      }
     }
   }
 
@@ -264,11 +326,17 @@ function rejectWaiters<TAgent>(waiters: RefreshWaiter<TAgent>[], error: unknown)
 }
 
 function createNotRunningError(): Error {
-  return new Error(WATCH_RUNTIME_ERROR_MESSAGES.notRunning);
+  return new WatchRuntimeError(
+    WATCH_RUNTIME_ERROR_CODES.notRunning,
+    WATCH_RUNTIME_ERROR_MESSAGES.notRunning,
+  );
 }
 
 function createStoppedError(): Error {
-  return new Error(WATCH_RUNTIME_ERROR_MESSAGES.stoppedBeforeRefreshCompleted);
+  return new WatchRuntimeError(
+    WATCH_RUNTIME_ERROR_CODES.stoppedBeforeRefreshCompleted,
+    WATCH_RUNTIME_ERROR_MESSAGES.stoppedBeforeRefreshCompleted,
+  );
 }
 
 async function disconnectQuietly(source: { disconnect?(): Promise<void> | void }): Promise<void> {

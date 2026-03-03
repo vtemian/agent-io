@@ -41,7 +41,29 @@ export const WATCH_RUNTIME_ERROR_MESSAGES = {
   stoppedBeforeRefreshCompleted: "Watch runtime stopped before refresh completed.",
 } as const;
 
+export const WATCH_RUNTIME_ERROR_CODES = {
+  notRunning: "NOT_RUNNING",
+  stoppedBeforeRefreshCompleted: "STOPPED_BEFORE_REFRESH_COMPLETED",
+} as const;
+export type WatchRuntimeErrorCode =
+  (typeof WATCH_RUNTIME_ERROR_CODES)[keyof typeof WATCH_RUNTIME_ERROR_CODES];
+
+export class WatchRuntimeError extends Error {
+  code: WatchRuntimeErrorCode;
+
+  constructor(code: WatchRuntimeErrorCode, message: string) {
+    super(message);
+    this.name = "WatchRuntimeError";
+    this.code = code;
+  }
+}
+
+export function isWatchRuntimeError(error: unknown): error is WatchRuntimeError {
+  return error instanceof WatchRuntimeError;
+}
+
 export const AGENT_SUBSCRIPTION_EVENT_TYPES = {
+  snapshot: "snapshot",
   updated: "updated",
   errored: "errored",
   started: "started",
