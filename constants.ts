@@ -11,6 +11,7 @@ export const DEFAULT_SEAT_COUNT = 6;
 
 export const POLLING_BACKOFF_MULTIPLIER = 2;
 export const POLLING_MAX_BACKOFF_MS = 10_000;
+export const AGENT_COMPLETION_QUIET_WINDOW_MS = 90_000;
 
 export const STATUS_CYCLE: readonly AgentStatus[] = [
   AGENT_STATUS.running,

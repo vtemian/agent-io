@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { AGENT_COMPLETION_QUIET_WINDOW_MS } from "../constants";
 import {
   AGENT_KIND,
   AGENT_SOURCE_KIND,
@@ -174,6 +175,9 @@ export function createCursorTranscriptSource(
     let latestUserTask: string | undefined;
     let sawConversationRecord = false;
     let latestConversationSignal: ConversationSignal | undefined;
+    let latestConversationRole: string | undefined;
+    let sawUserTurn = false;
+    let hasAssistantReplyAfterLatestUser = false;
 
     for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
       const rawLine = lines[lineNumber];
@@ -197,12 +201,18 @@ export function createCursorTranscriptSource(
           continue;
         }
         sawConversationRecord = true;
+        latestConversationRole = conversationRecord.role;
         if (conversationRecord.role === "user" && conversationRecord.text) {
           latestUserTask = sanitizeTaskSummary(conversationRecord.text);
           latestConversationSignal = "active";
+          sawUserTurn = true;
+          hasAssistantReplyAfterLatestUser = false;
         }
         if (conversationRecord.text) {
           if (isAssistantRole(conversationRecord.role)) {
+            if (sawUserTurn) {
+              hasAssistantReplyAfterLatestUser = true;
+            }
             const signal = deriveConversationSignal(conversationRecord.text);
             if (signal) {
               latestConversationSignal = signal;
@@ -253,7 +263,13 @@ export function createCursorTranscriptSource(
         name: deriveAgentName(agentId, sourcePath),
         kind: AGENT_KIND.local,
         isSubagent: isSubagentPath(sourcePath),
-        status: deriveConversationStatus(now, fileUpdatedAt, latestConversationSignal),
+        status: deriveConversationStatus(
+          now,
+          fileUpdatedAt,
+          latestConversationSignal,
+          latestConversationRole,
+          hasAssistantReplyAfterLatestUser,
+        ),
         taskSummary: latestUserTask ?? "Working",
         updatedAt: fileUpdatedAt,
         source: AGENT_SOURCE_KIND.cursorTranscripts,
@@ -326,6 +342,8 @@ function deriveConversationStatus(
   now: number,
   updatedAt: number,
   latestSignal: ConversationSignal | undefined,
+  latestRole: string | undefined,
+  hasAssistantReplyAfterLatestUser: boolean,
 ): AgentStatus {
   if (latestSignal === "error") {
     return AGENT_STATUS.error;
@@ -336,6 +354,18 @@ function deriveConversationStatus(
   const ageMs = Math.max(0, now - updatedAt);
   if (ageMs <= RUNNING_WINDOW_MS) {
     return AGENT_STATUS.running;
+  }
+  if (latestSignal === "active" && !hasAssistantReplyAfterLatestUser) {
+    if (ageMs <= IDLE_WINDOW_MS) {
+      return AGENT_STATUS.idle;
+    }
+    return AGENT_STATUS.completed;
+  }
+  if (hasAssistantReplyAfterLatestUser && isAssistantRole(latestRole ?? "")) {
+    if (ageMs <= AGENT_COMPLETION_QUIET_WINDOW_MS) {
+      return AGENT_STATUS.idle;
+    }
+    return AGENT_STATUS.completed;
   }
   if (ageMs <= IDLE_WINDOW_MS) {
     return AGENT_STATUS.idle;
