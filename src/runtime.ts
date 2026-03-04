@@ -1,4 +1,5 @@
 import { createLifecycleMapper } from "./lifecycle";
+import uniq from "lodash.uniq";
 import type { WatchRuntime, WatchRuntimeEvent, WatchRuntimeOptions, WatchSnapshot } from "./types";
 import {
   WATCH_RUNTIME_ERROR_CODES,
@@ -259,14 +260,11 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
       return;
     }
 
-    const subscribedPaths = new Set<string>();
-    for (const watchPath of configuredWatchPaths) {
-      const trimmed = watchPath.trim();
-      if (!trimmed || subscribedPaths.has(trimmed)) {
-        continue;
-      }
-      subscribedPaths.add(trimmed);
-      trySubscribeWatchPath(trimmed, token);
+    const normalizedWatchPaths = uniq(
+      configuredWatchPaths.map((watchPath) => watchPath.trim()).filter((watchPath) => watchPath.length > 0),
+    );
+    for (const watchPath of normalizedWatchPaths) {
+      trySubscribeWatchPath(watchPath, token);
     }
   }
 

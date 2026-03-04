@@ -7,7 +7,7 @@ export const DEFAULT_REFRESH_MS = 250;
 export const MIN_REFRESH_MS = 100;
 export const MAX_REFRESH_MS = 10_000;
 
-export const DEFAULT_SEAT_COUNT = 6;
+export const DEFAULT_SEAT_COUNT = 20;
 
 export const POLLING_BACKOFF_MULTIPLIER = 2;
 export const POLLING_MAX_BACKOFF_MS = 10_000;
