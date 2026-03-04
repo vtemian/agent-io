@@ -254,28 +254,14 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
       return;
     }
 
+    const subscribedPaths = new Set<string>();
     for (const watchPath of configuredWatchPaths) {
       const trimmed = watchPath.trim();
-      if (!trimmed) {
+      if (!trimmed || subscribedPaths.has(trimmed)) {
         continue;
       }
-
-      try {
-        const subscription = subscribeToChanges(
-          trimmed,
-          () => onWatchedEvent(token),
-          (error) => onWatchedError(trimmed, error, token),
-        );
-        subscribeForWatchPath(trimmed, subscription);
-        clearResubscribeState(trimmed);
-      } catch (error) {
-        emit({
-          type: WATCH_RUNTIME_EVENT_TYPES.error,
-          at: now(),
-          error,
-        });
-        scheduleResubscribe(trimmed, token);
-      }
+      subscribedPaths.add(trimmed);
+      trySubscribeWatchPath(trimmed, token);
     }
   }
 
@@ -311,23 +297,7 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
     }
 
     unsubscribeByWatchPath(watchPath);
-
-    try {
-      const subscription = subscribeToChanges(
-        watchPath,
-        () => onWatchedEvent(token),
-        (error) => onWatchedError(watchPath, error, token),
-      );
-      subscribeForWatchPath(watchPath, subscription);
-      clearResubscribeState(watchPath);
-    } catch (error) {
-      emit({
-        type: WATCH_RUNTIME_EVENT_TYPES.error,
-        at: now(),
-        error,
-      });
-      scheduleResubscribe(watchPath, token);
-    }
+    trySubscribeWatchPath(watchPath, token);
   }
 
   function clearDebounceTimer(): void {
@@ -358,6 +328,32 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
       watchPath,
       close: () => subscription.close(),
     });
+  }
+
+  function trySubscribeWatchPath(watchPath: string, token: number): void {
+    if (
+      !subscribeToChanges ||
+      (state !== "started" && state !== "starting") ||
+      token !== lifecycleToken
+    ) {
+      return;
+    }
+    try {
+      const subscription = subscribeToChanges(
+        watchPath,
+        () => onWatchedEvent(token),
+        (error) => onWatchedError(watchPath, error, token),
+      );
+      subscribeForWatchPath(watchPath, subscription);
+      clearResubscribeState(watchPath);
+    } catch (error) {
+      emit({
+        type: WATCH_RUNTIME_EVENT_TYPES.error,
+        at: now(),
+        error,
+      });
+      scheduleResubscribe(watchPath, token);
+    }
   }
 
   function scheduleResubscribe(watchPath: string, token: number): void {

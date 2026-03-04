@@ -2,6 +2,12 @@ import { statSync, watch } from "node:fs";
 import path from "node:path";
 import { createWatchRuntime } from "./runtime";
 import { resolveTranscriptDirectories, resolveTranscriptSourcePaths } from "./discovery";
+import type {
+  AgentLifecycleEvent,
+  AgentSnapshot,
+  AgentSourceReadResult,
+  AgentStatus,
+} from "./domain";
 import { createCursorTranscriptSource } from "./transcripts";
 import type { WatchSource } from "./types";
 import {
@@ -9,13 +15,6 @@ import {
   WATCH_RUNTIME_EVENT_TYPES,
   WATCH_RUNTIME_STATES,
 } from "./types";
-import type {
-  AgentLifecycleEvent,
-  AgentSnapshot,
-  AgentSourceReadResult,
-  AgentStatus,
-} from "@shared/types";
-import { AGENT_SOURCE_KIND } from "@shared/types";
 
 interface AgentSourceLike {
   connect(): Promise<void> | void;
@@ -263,34 +262,29 @@ function indexAgentsById(agents: AgentSnapshot[]): Map<string, AgentSnapshot> {
 
 function createDefaultSourceFactory(workspacePaths: string[]): AgentSourceLike {
   const watchRoots = resolveTranscriptDirectories({ workspacePaths });
+  let sourcePaths = resolveCurrentSourcePaths(workspacePaths);
+  let source = createCursorTranscriptSource({ sourcePaths });
   let connected = false;
 
   return {
     connect(): void {
       connected = true;
+      source.connect();
     },
     disconnect(): void {
       connected = false;
+      source.disconnect();
     },
     async readSnapshot(nowAt?: number): Promise<AgentSourceReadResult> {
-      if (!connected) {
-        return {
-          agents: [],
-          connected: false,
-          sourceLabel: AGENT_SOURCE_KIND.cursorTranscripts,
-          warnings: ["Cursor transcript source is disconnected."],
-        };
+      const nextSourcePaths = resolveCurrentSourcePaths(workspacePaths);
+      if (haveSourcePathsChanged(sourcePaths, nextSourcePaths)) {
+        source.disconnect();
+        sourcePaths = nextSourcePaths;
+        source = createCursorTranscriptSource({ sourcePaths });
+        if (connected) {
+          source.connect();
+        }
       }
-
-      const sourcePaths = normalizeSourcePaths(
-        resolveTranscriptSourcePaths({
-          workspacePaths,
-        }),
-      );
-      const source = createCursorTranscriptSource({
-        sourcePaths,
-      });
-      source.connect();
       return source.readSnapshot(nowAt);
     },
     getWatchPaths(): string[] {
@@ -303,6 +297,26 @@ function normalizeSourcePaths(sourcePaths: readonly string[]): string[] {
   return sourcePaths
     .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
     .filter((entry) => entry.length > 0);
+}
+
+function resolveCurrentSourcePaths(workspacePaths: string[]): string[] {
+  return normalizeSourcePaths(
+    resolveTranscriptSourcePaths({
+      workspacePaths,
+    }),
+  );
+}
+
+function haveSourcePathsChanged(previous: readonly string[], next: readonly string[]): boolean {
+  if (previous.length !== next.length) {
+    return true;
+  }
+  for (let index = 0; index < previous.length; index += 1) {
+    if (previous[index] !== next[index]) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function createDefaultWatcher(watchPath: string, onEvent: () => void): WatcherLike {

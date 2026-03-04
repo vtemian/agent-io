@@ -1,7 +1,46 @@
-export * from "./agents";
+export {
+  createAgentSubscription,
+  isAgentUpdatedEvent,
+  type AgentChange,
+  type AgentSnapshotEvent,
+  type AgentStateSnapshot,
+  type AgentSubscription,
+  type AgentSubscriptionEvent,
+  type AgentSubscriptionHealth,
+  type AgentSubscriptionOptions,
+  type AgentUpdatedEvent,
+} from "./agents";
+export {
+  AGENT_KIND,
+  AGENT_LIFECYCLE_EVENT_KIND,
+  AGENT_SOURCE_KIND,
+  AGENT_STATUS,
+  type AgentKind,
+  type AgentLifecycleEvent,
+  type AgentLifecycleEventType,
+  type AgentSnapshot,
+  type AgentSourceKind,
+  type AgentSourceReadResult,
+  type AgentStatus,
+} from "./domain";
+export { createLifecycleMapper } from "./lifecycle";
+export { createWatchRuntime } from "./runtime";
 export {
   AGENT_SUBSCRIPTION_EVENT_TYPES,
+  WATCH_LIFECYCLE_KIND,
   WATCH_RUNTIME_ERROR_CODES,
   WATCH_RUNTIME_ERROR_MESSAGES,
+  WATCH_RUNTIME_EVENT_TYPES,
+  WATCH_RUNTIME_STATES,
   isWatchRuntimeError,
+  type LifecycleSnapshot,
+  type WatchHealth,
+  type WatchLifecycleEvent,
+  type WatchLifecycleKind,
+  type WatchRuntimeErrorCode,
+  type WatchRuntimeOptions,
+  type WatchRuntime,
+  type WatchRuntimeEvent,
+  type WatchSource,
+  type WatchSnapshot,
 } from "./types";

@@ -8,7 +8,7 @@ import {
   type AgentSnapshot,
   type AgentSourceReadResult,
   type AgentStatus,
-} from "@shared/types";
+} from "./domain";
 import { z } from "zod";
 
 interface CursorTranscriptRecord {
@@ -228,6 +228,7 @@ export function createCursorTranscriptSource(
         id: record.agentId,
         name: record.agentName,
         kind: kindResult.value,
+        isSubagent: isSubagentPath(sourcePath),
         status: statusResult.data,
         taskSummary: record.task,
         updatedAt: record.updatedAt,
@@ -251,6 +252,7 @@ export function createCursorTranscriptSource(
         id: agentId,
         name: deriveAgentName(agentId, sourcePath),
         kind: AGENT_KIND.local,
+        isSubagent: isSubagentPath(sourcePath),
         status: deriveConversationStatus(now, fileUpdatedAt, latestConversationSignal),
         taskSummary: latestUserTask ?? "Working",
         updatedAt: fileUpdatedAt,
@@ -347,8 +349,12 @@ function deriveAgentId(sourcePath: string): string {
 }
 
 function deriveAgentName(agentId: string, sourcePath: string): string {
-  const prefix = sourcePath.includes("/subagents/") ? "Subagent" : "Agent";
+  const prefix = isSubagentPath(sourcePath) ? "Subagent" : "Agent";
   return `${prefix} ${agentId.slice(0, 6)}`;
+}
+
+function isSubagentPath(sourcePath: string): boolean {
+  return sourcePath.includes("/subagents/");
 }
 
 function isAssistantRole(role: string): boolean {
