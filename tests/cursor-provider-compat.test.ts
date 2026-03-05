@@ -1,20 +1,20 @@
 import {
-  createAgentSubscription as createFromLegacyAgents,
-  resolveTranscriptDirectories as resolveFromLegacyDiscovery,
-  createCursorTranscriptSource as createFromLegacyTranscripts,
-} from "../src/index";
+  createAgentSubscription as createFromRoot,
+  resolveTranscriptDirectories as resolveFromRoot,
+  createCursorTranscriptSource as createFromRootTranscripts,
+} from "@/index";
 import {
   createAgentSubscription as createFromProvider,
   resolveTranscriptDirectories as resolveFromProvider,
   createCursorTranscriptSource as createFromProviderTranscripts,
-} from "../src/providers/cursor/index";
+} from "@/providers/cursor/index";
 import { describe, expect, it } from "vitest";
 
 describe("cursor provider compatibility exports", () => {
   it("keeps agent subscription and adapters wired through provider module", () => {
-    expect(createFromLegacyAgents).toBe(createFromProvider);
-    expect(resolveFromLegacyDiscovery).toBe(resolveFromProvider);
-    expect(createFromLegacyTranscripts).toBe(createFromProviderTranscripts);
+    expect(createFromRoot).toBe(createFromProvider);
+    expect(resolveFromRoot).toBe(resolveFromProvider);
+    expect(createFromRootTranscripts).toBe(createFromProviderTranscripts);
   });
 
   it("keeps subscription behavior parity for runtime events", async () => {
@@ -53,7 +53,7 @@ describe("cursor provider compatibility exports", () => {
       trigger: onEvent,
     });
 
-    const subA = createFromLegacyAgents({
+    const subA = createFromRoot({
       projectPath: "/tmp/project",
       sourceFactory,
       watchFactory: (watchPath, onEvent) => watchFactory(watchPath, onEvent),

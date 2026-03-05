@@ -13,6 +13,10 @@
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
     "types": ["node", "vitest/globals"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
     "outDir": "dist"
   },
   "include": ["src", "tests", "examples", "tsup.config.ts", "vitest.config.ts"]

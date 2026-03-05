@@ -5,14 +5,10 @@ import type {
   AgentSnapshot,
   AgentSourceReadResult,
   AgentStatus,
-} from "../../domain";
-import { createWatchRuntime } from "../../runtime";
-import {
-  AGENT_SUBSCRIPTION_EVENT_TYPES,
-  WATCH_RUNTIME_EVENT_TYPES,
-  WATCH_RUNTIME_STATES,
-  type WatchSource,
-} from "../../types";
+} from "@/domain";
+import { createWatchRuntime } from "@/core/runtime";
+import { AGENT_SUBSCRIPTION_EVENT_TYPES } from "@/types";
+import { WATCH_RUNTIME_EVENT_TYPES, WATCH_RUNTIME_STATES, type WatchSource } from "@/core/types";
 import { resolveTranscriptDirectories, resolveTranscriptSourcePaths } from "./discovery";
 import { createCursorTranscriptSource } from "./transcripts";
 

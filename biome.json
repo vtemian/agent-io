@@ -17,7 +17,20 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true
+      "recommended": true,
+      "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "patterns": [
+              {
+                "group": ["../*"],
+                "message": "Use @/* path aliases instead of parent-relative imports."
+              }
+            ]
+          }
+        }
+      }
     }
   },
   "javascript": {

@@ -4,7 +4,7 @@ import path from "node:path";
 import {
   resolveTranscriptDirectories,
   resolveTranscriptSourcePaths,
-} from "../src/providers/cursor/discovery";
+} from "@/providers/cursor/discovery";
 import { describe, expect, it } from "vitest";
 
 function workspaceToTranscriptDir(workspacePath: string): string {

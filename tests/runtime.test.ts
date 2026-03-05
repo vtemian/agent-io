@@ -3,7 +3,7 @@ import {
   WATCH_RUNTIME_EVENT_TYPES,
   WATCH_RUNTIME_STATES,
   isWatchRuntimeError,
-} from "../src/core/index";
+} from "@/core/index";
 import { describe, expect, it } from "vitest";
 
 describe("createWatchRuntime", () => {

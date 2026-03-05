@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { createCursorTranscriptSource } from "../src/providers/cursor/transcripts";
+import { createCursorTranscriptSource } from "@/providers/cursor/transcripts";
 import { describe, expect, it } from "vitest";
 
 describe("cursor transcripts", () => {

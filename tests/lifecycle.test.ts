@@ -1,4 +1,4 @@
-import { createLifecycleMapper, WATCH_LIFECYCLE_KIND } from "../src/core/index";
+import { createLifecycleMapper, WATCH_LIFECYCLE_KIND } from "@/core/index";
 import { describe, expect, it } from "vitest";
 
 describe("createLifecycleMapper", () => {

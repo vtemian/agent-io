@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { AGENT_COMPLETION_QUIET_WINDOW_MS } from "../../constants";
+import { AGENT_COMPLETION_QUIET_WINDOW_MS } from "@/constants";
 import {
   AGENT_KIND,
   AGENT_SOURCE_KIND,
@@ -9,7 +9,7 @@ import {
   type AgentSnapshot,
   type AgentSourceReadResult,
   type AgentStatus,
-} from "../../domain";
+} from "@/domain";
 import { z } from "zod";
 
 interface CursorTranscriptRecord {

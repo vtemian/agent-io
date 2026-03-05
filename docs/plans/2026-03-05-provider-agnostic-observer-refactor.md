@@ -8,13 +8,13 @@ Refactor `@agent-io/observer` so consumers depend on a provider-agnostic core AP
 
 - `core` contains only generic contracts, runtime orchestration, lifecycle diffing, and canonical models.
 - `providers/cursor` owns all Cursor filesystem and transcript assumptions.
-- Root API keeps backward compatibility during migration.
+- Root API exposes only the current development shape (no legacy compatibility requirements).
 - Future providers (`claude-code`, `codex`, `opencode`) can be added without changing core semantics.
 
 ## Principles
 
 - No provider-specific paths, schemas, or heuristics in core.
-- Minimize API breakage; provide compatibility wrappers and deprecation windows.
+- Prioritize clean architecture over compatibility wrappers while project is pre-release.
 - Use small, reviewable phases with strict parity tests for Cursor behavior.
 
 ## Current State Summary
@@ -30,7 +30,7 @@ Refactor `@agent-io/observer` so consumers depend on a provider-agnostic core AP
 - [x] Add canonical model contracts under `src/core/model.ts`
 - [x] Add provider contracts under `src/core/providers.ts`
 - [x] Split generic runtime types into `src/core/types.ts`
-- [x] Keep compatibility by re-exporting core runtime types from `src/types.ts`
+- [x] Keep temporary bridge by re-exporting core runtime types from `src/types.ts`
 - [x] Update `src/core/index.ts` to export local core modules
 - [x] Add tests validating new core contract exports
 - [ ] Document core contract usage in README (follow-up in Phase 3)
@@ -46,7 +46,7 @@ Refactor `@agent-io/observer` so consumers depend on a provider-agnostic core AP
 - [x] Move `src/discovery.ts` to `src/providers/cursor/discovery.ts`
 - [x] Move `src/transcripts.ts` to `src/providers/cursor/transcripts.ts`
 - [ ] Move provider-specific constants/domain to `src/providers/cursor/*`
-- [x] Keep compatibility re-exports from previous paths
+- [x] Validate root-vs-provider parity for exported Cursor APIs
 - [x] Add parity tests for `createAgentSubscription`
 
 **Verification**
@@ -58,28 +58,15 @@ Refactor `@agent-io/observer` so consumers depend on a provider-agnostic core AP
 
 - [ ] Add `src/core/observer.ts` with provider-injected runtime composition
 - [ ] Expose new API in root exports
-- [ ] Keep Cursor default wrapper for legacy consumers
 - [ ] Add examples for provider-agnostic usage
 - [ ] Update README to lead with provider-agnostic API
 
 **Verification**
 - [ ] New API tests pass with injected Cursor provider
-- [ ] Legacy API tests still pass
 - [ ] `npm run check`
 - [ ] `npm run build`
 
-### Phase 4 - Deprecation and migration docs
-
-- [ ] Mark Cursor-coupled root exports as deprecated via JSDoc
-- [ ] Add `MIGRATION.md` with before/after usage
-- [ ] Add timeline for removal in next major release
-
-**Verification**
-- [ ] Generated declaration files include deprecations
-- [ ] `npm run check`
-- [ ] `npm run build`
-
-### Phase 5 - Provider scaffolds for Claude/Codex/OpenCode
+### Phase 4 - Provider scaffolds for Claude/Codex/OpenCode
 
 - [ ] Add provider folders and contract-compliant stubs
 - [ ] Add fixture-driven normalization tests per provider
@@ -89,12 +76,6 @@ Refactor `@agent-io/observer` so consumers depend on a provider-agnostic core AP
 - [ ] All provider stubs compile and tests pass
 - [ ] `npm run check`
 - [ ] `npm run build`
-
-### Phase 6 - Major release cleanup
-
-- [ ] Remove deprecated root Cursor-coupled APIs
-- [ ] Finalize root exports around core-first API
-- [ ] Publish semver-major with migration notes
 
 ## Test Strategy
 
@@ -106,8 +87,8 @@ Refactor `@agent-io/observer` so consumers depend on a provider-agnostic core AP
   - transcript discovery path resolution and dedupe
   - parser behavior for flat and conversation-only transcripts
   - status heuristic edge cases
-- Compatibility tests:
-  - old and new APIs produce equivalent event streams
+- Root/provider parity tests:
+  - root exports and provider exports produce equivalent event streams for Cursor
 
 ## Risks and Mitigations
 
@@ -115,12 +96,11 @@ Refactor `@agent-io/observer` so consumers depend on a provider-agnostic core AP
   - **Mitigation:** parity tests before and after each move
 - **Risk:** over-abstraction too early
   - **Mitigation:** keep minimal canonical model and provider metadata passthrough
-- **Risk:** migration confusion
-  - **Mitigation:** root docs and explicit deprecation timeline
+- **Risk:** premature API churn
+  - **Mitigation:** keep docs current and avoid adding deprecated surfaces before first stable release
 
 ## Definition of Done
 
 - Core is provider-agnostic by code and by public API.
 - Cursor is implemented as a provider module, not an implicit core dependency.
-- Existing consumers have a documented, non-breaking migration path.
 - CI/check/build remain green across all phases.

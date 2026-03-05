@@ -1,4 +1,4 @@
-import * as core from "../src/core/index";
+import * as core from "@/core/index";
 import { describe, expect, it } from "vitest";
 
 describe("core provider contracts", () => {

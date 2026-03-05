@@ -1,4 +1,4 @@
-import { createAgentSubscription } from "../src/index";
+import { createAgentSubscription } from "@/index";
 
 async function main(): Promise<void> {
   const projectPath = process.argv[2];
