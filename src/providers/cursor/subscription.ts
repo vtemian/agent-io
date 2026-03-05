@@ -62,7 +62,7 @@ export type AgentSubscriptionEvent =
   | {
       type: typeof AGENT_SUBSCRIPTION_EVENT_TYPES.errored;
       at: number;
-      error: unknown;
+      error: Error;
       agent: AgentSnapshot | undefined;
     }
   | {

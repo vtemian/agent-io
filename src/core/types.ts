@@ -104,7 +104,7 @@ export type WatchRuntimeEvent<TAgent, TStatus extends string = string> =
       at: number;
       state: (typeof WATCH_RUNTIME_STATES)[keyof typeof WATCH_RUNTIME_STATES];
     }
-  | { type: typeof WATCH_RUNTIME_EVENT_TYPES.error; at: number; error: unknown };
+  | { type: typeof WATCH_RUNTIME_EVENT_TYPES.error; at: number; error: Error };
 
 export interface WatchRuntime<TAgent, TStatus extends string = string> {
   start(): Promise<void>;

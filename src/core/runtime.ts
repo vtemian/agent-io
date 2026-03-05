@@ -1,4 +1,5 @@
 import { createLifecycleMapper } from "./lifecycle";
+import { toError } from "./errors";
 import type { WatchRuntime, WatchRuntimeEvent, WatchRuntimeOptions, WatchSnapshot } from "./types";
 import {
   WATCH_RUNTIME_ERROR_CODES,
@@ -245,7 +246,7 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
       emit({
         type: WATCH_RUNTIME_EVENT_TYPES.error,
         at: now(),
-        error,
+        error: toError(error),
       });
       rejectWaiters(waitersForCycle, error);
     }
@@ -324,7 +325,7 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
         emit({
           type: WATCH_RUNTIME_EVENT_TYPES.error,
           at: now(),
-          error,
+          error: toError(error),
         });
       }
     }
@@ -357,7 +358,7 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
       emit({
         type: WATCH_RUNTIME_EVENT_TYPES.error,
         at: now(),
-        error,
+        error: toError(error),
       });
       scheduleResubscribe(watchPath, token);
     }
@@ -480,5 +481,9 @@ function createStoppedError(): Error {
 }
 
 async function disconnectQuietly(source: { disconnect?(): Promise<void> | void }): Promise<void> {
-  await Promise.resolve(source.disconnect?.()).catch(() => undefined);
+  try {
+    await Promise.resolve(source.disconnect?.());
+  } catch {
+    // Best-effort cleanup should not override prior runtime failures.
+  }
 }

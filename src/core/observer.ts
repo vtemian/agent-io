@@ -45,7 +45,7 @@ export type ObserverEvent =
   | {
       type: typeof OBSERVER_EVENT_TYPES.errored;
       at: number;
-      error: unknown;
+      error: Error;
       agent: CanonicalAgentSnapshot | undefined;
     }
   | {
