@@ -49,18 +49,17 @@ The watch runtime (used by `createObserver`) is designed around a small state ma
 ```mermaid
 stateDiagram-v2
   [*] --> stopped
-  stopped --> starting: start()
-  starting --> started: connect + subscribe + started event
-  starting --> stopped: start aborted / failed
-  started --> started: watch event (debounced) / refreshNow()
-  started --> stopping: stop()
-  stopping --> stopped: disconnect + stopped event
+  stopped --> starting : start()
+  starting --> started : connect + subscribe
+  starting --> stopped : abort / error
+  started --> stopping : stop()
+  stopping --> stopped : disconnect
 
   state started {
     [*] --> idle
-    idle --> refreshing: pendingRefresh
-    refreshing --> idle: snapshot + lifecycle events
-    refreshing --> idle: error event
+    idle --> refreshing : watch event / refreshNow()
+    refreshing --> idle : snapshot + lifecycle
+    refreshing --> idle : error
   }
 ```
 
@@ -102,10 +101,9 @@ When a provider exposes `subscribeToChanges`, runtime subscriptions:
 
 ## Public Entry Points
 
-- Root package:
-  - `@agent-io/core`
-- Cursor provider only:
-  - `@agent-io/core/providers/cursor`
+- `@agent-io/core` — full package (core + Cursor provider, `createObserver` defaults to Cursor)
+- `@agent-io/core/core` — core runtime, lifecycle, model, and provider types only
+- `@agent-io/core/providers/cursor` — Cursor transcript provider only
 
 ## Development
 
@@ -129,12 +127,6 @@ npm run build
 See:
 
 - `examples/provider-observer.ts` (provider-injected API)
-
-## Roadmap
-
-- Add provider contract abstraction for non-Cursor transcript systems
-- Add built-in providers for Claude Code, Codex, and OpenCode
-- Add normalization layer with canonical event model
 
 ## License
 
