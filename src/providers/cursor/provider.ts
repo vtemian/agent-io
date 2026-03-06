@@ -9,14 +9,34 @@ import {
   type TranscriptProvider,
   type TranscriptReadResult,
 } from "@/core";
-import type { AgentSourceReadResult } from "@/domain";
+import type { AgentKind, AgentSourceReadResult, AgentStatus } from "@/domain";
 import { AGENT_SOURCE_KIND } from "@/domain";
+import { z } from "zod";
 import { resolveTranscriptDirectories, resolveTranscriptSourcePaths } from "./discovery";
 import { createCursorTranscriptSource, type CursorTranscriptSource } from "./transcripts";
 
 export interface CursorTranscriptProviderOptions {
   sourceLabel?: string;
 }
+
+const agentSourceSnapshotSchema = z.object({
+  agents: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      kind: z.enum(["local", "remote"]),
+      isSubagent: z.boolean(),
+      status: z.enum(["running", "idle", "completed", "error"]),
+      taskSummary: z.string(),
+      startedAt: z.number().optional(),
+      updatedAt: z.number(),
+      source: z.string(),
+    }),
+  ),
+  connected: z.boolean(),
+  sourceLabel: z.string(),
+  warnings: z.array(z.string()),
+});
 
 export function createCursorTranscriptProvider(
   options: CursorTranscriptProviderOptions = {},
@@ -86,16 +106,9 @@ export function createCursorTranscriptProvider(
     const agents: CanonicalAgentSnapshot[] = (snapshot?.agents ?? []).map((agent) => ({
       id: agent.id,
       name: agent.name,
-      kind: agent.kind === "remote" ? CANONICAL_AGENT_KIND.remote : CANONICAL_AGENT_KIND.local,
+      kind: mapAgentKind(agent.kind),
       isSubagent: agent.isSubagent,
-      status:
-        agent.status === "error"
-          ? CANONICAL_AGENT_STATUS.error
-          : agent.status === "completed"
-            ? CANONICAL_AGENT_STATUS.completed
-            : agent.status === "idle"
-              ? CANONICAL_AGENT_STATUS.idle
-              : CANONICAL_AGENT_STATUS.running,
+      status: mapAgentStatus(agent.status),
       taskSummary: agent.taskSummary,
       startedAt: agent.startedAt,
       updatedAt: agent.updatedAt,
@@ -135,28 +148,28 @@ function buildSourcePathKey(sourcePaths: string[]): string {
   return sourcePaths.join("\n");
 }
 
-function isAgentSourceReadResult(value: unknown): value is AgentSourceReadResult {
-  if (!value || typeof value !== "object") {
-    return false;
+function mapAgentKind(kind: AgentKind): CanonicalAgentSnapshot["kind"] {
+  switch (kind) {
+    case "remote":
+      return CANONICAL_AGENT_KIND.remote;
+    case "local":
+      return CANONICAL_AGENT_KIND.local;
   }
-  if (!hasObjectProperty(value, "agents") || !Array.isArray(value.agents)) {
-    return false;
-  }
-  if (!hasObjectProperty(value, "connected") || typeof value.connected !== "boolean") {
-    return false;
-  }
-  if (!hasObjectProperty(value, "sourceLabel") || typeof value.sourceLabel !== "string") {
-    return false;
-  }
-  if (!hasObjectProperty(value, "warnings") || !Array.isArray(value.warnings)) {
-    return false;
-  }
-  return true;
 }
 
-function hasObjectProperty<TKey extends string>(
-  value: unknown,
-  key: TKey,
-): value is Record<TKey, unknown> {
-  return typeof value === "object" && value !== null && key in value;
+function mapAgentStatus(status: AgentStatus): CanonicalAgentSnapshot["status"] {
+  switch (status) {
+    case "error":
+      return CANONICAL_AGENT_STATUS.error;
+    case "completed":
+      return CANONICAL_AGENT_STATUS.completed;
+    case "idle":
+      return CANONICAL_AGENT_STATUS.idle;
+    case "running":
+      return CANONICAL_AGENT_STATUS.running;
+  }
+}
+
+function isAgentSourceReadResult(value: unknown): value is AgentSourceReadResult {
+  return agentSourceSnapshotSchema.safeParse(value).success;
 }
