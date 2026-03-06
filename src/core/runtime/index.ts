@@ -1,5 +1,5 @@
-import { createLifecycleMapper } from "../lifecycle";
-import { toError } from "../errors";
+import { createLifecycleMapper } from "@/core/lifecycle";
+import { toError } from "@/core/errors";
 import {
   DEFAULT_DEBOUNCE_MS,
   type RefreshWaiter,
@@ -13,8 +13,8 @@ import {
   resolveWaiters,
 } from "./shared";
 import { createRuntimeSubscriptions } from "./subscriptions";
-import type { WatchRuntime, WatchRuntimeEvent, WatchRuntimeOptions, WatchSnapshot } from "../types";
-import { WATCH_RUNTIME_EVENT_TYPES } from "../types";
+import type { WatchRuntime, WatchRuntimeEvent, WatchRuntimeOptions, WatchSnapshot } from "@/core/types";
+import { WATCH_RUNTIME_EVENT_TYPES } from "@/core/types";
 
 export function createWatchRuntime<TAgent, TStatus extends string = string>(
   options: WatchRuntimeOptions<TAgent, TStatus>,
@@ -145,11 +145,10 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
     try {
       await source.disconnect?.();
     } finally {
-      if (!isTokenCurrent(token)) {
-        return;
+      if (isTokenCurrent(token)) {
+        runtimeState.state = WATCH_RUNTIME_INTERNAL_STATES.stopped;
+        emitStateEvent(WATCH_RUNTIME_INTERNAL_STATES.stopped);
       }
-      runtimeState.state = WATCH_RUNTIME_INTERNAL_STATES.stopped;
-      emitStateEvent(WATCH_RUNTIME_INTERNAL_STATES.stopped);
     }
   }
 

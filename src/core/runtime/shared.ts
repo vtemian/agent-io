@@ -1,9 +1,9 @@
-import type { WatchSnapshot } from "../types";
+import type { WatchSnapshot } from "@/core/types";
 import {
   WATCH_RUNTIME_ERROR_CODES,
   WATCH_RUNTIME_ERROR_MESSAGES,
   WatchRuntimeError,
-} from "../errors";
+} from "@/core/errors";
 
 export const DEFAULT_DEBOUNCE_MS = 150;
 export const WATCH_RESUBSCRIBE_BASE_DELAY_MS = 500;

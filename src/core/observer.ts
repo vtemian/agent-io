@@ -3,7 +3,6 @@ import { WATCH_RUNTIME_EVENT_TYPES, WATCH_RUNTIME_STATES, type WatchSource } fro
 import type { CanonicalAgentSnapshot, CanonicalAgentStatus } from "./model";
 import type {
   CanonicalSnapshot,
-  DiscoveryInput,
   DiscoveryResult,
   TranscriptProvider,
   TranscriptReadResult,

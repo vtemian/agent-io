@@ -1,4 +1,4 @@
-import { toError } from "../errors";
+import { toError } from "@/core/errors";
 import {
   WATCH_RESUBSCRIBE_BASE_DELAY_MS,
   WATCH_RESUBSCRIBE_MAX_DELAY_MS,
