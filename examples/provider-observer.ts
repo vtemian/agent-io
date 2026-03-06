@@ -1,4 +1,4 @@
-import { createObserver } from "@agentprobe/core";
+import { createObserver } from "../src/index";
 
 const DURATION_MS = 2 * 60 * 1000;
 let lastSnapshotAt = 0;
