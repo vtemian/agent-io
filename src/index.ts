@@ -66,9 +66,13 @@ export {
   resolveTranscriptSourcePaths,
   createCursorTranscriptProvider,
   createCursorTranscriptSource,
+  createCursorWatch,
+  CURSOR_WATCH_DEBOUNCE_MS,
   type CursorTranscriptProviderOptions,
   type CursorTranscriptSource,
   type CursorTranscriptSourceOptions,
+  type CursorWatch,
+  type CursorWatchOptions,
   type TranscriptDiscoveryOptions,
 } from "./providers/cursor";
 

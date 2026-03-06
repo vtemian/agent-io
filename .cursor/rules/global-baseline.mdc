@@ -1,0 +1,15 @@
+---
+description: Global baseline for all generated code
+alwaysApply: true
+---
+
+# Global Baseline
+
+- Use named exports only in `src`; do not add default exports.
+- Prefer `import type` for type-only imports.
+- Keep comments sparse and only for non-obvious logic.
+- Use early returns and small helpers over deep nesting.
+- Keep status/event values centralized in `as const` maps.
+- Never let listener callbacks crash runtime loops.
+- Run `npm run check` after substantive changes.
+- Run `npm run build` when runtime/build-sensitive code changes.

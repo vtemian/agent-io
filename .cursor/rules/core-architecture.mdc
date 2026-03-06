@@ -1,0 +1,15 @@
+---
+description: Core runtime architecture and safety patterns
+globs: src/core/**/*.ts
+alwaysApply: false
+---
+
+# Core Architecture
+
+- Keep `src/core` provider-agnostic; never import from `src/providers`.
+- Use factory APIs (`createX`) with closed-over state, not classes.
+- Keep contracts explicit via `...Event` interfaces and discriminated unions.
+- Use `unknown` at boundaries and normalize with `toError(...)`.
+- Wrap listener fan-out in `try/catch` so one consumer cannot break loops.
+- Make cleanup best-effort (`disconnect/close/unsubscribe` must not mask primary failures).
+- Organize files as: imports -> exported contracts -> internal constants -> factory -> private helpers.

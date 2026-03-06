@@ -1,0 +1,15 @@
+---
+description: Test conventions for vitest and filesystem-heavy cases
+globs: tests/**/*.test.ts
+alwaysApply: false
+---
+
+# Testing Patterns
+
+- Keep tests in `tests/*.test.ts` with behavior-first `it(...)` names.
+- Prefer black-box assertions on observable behavior over internals.
+- For filesystem tests, use unique `/tmp` paths and always cleanup in `afterEach`.
+- Use polling helpers (`waitUntil`, condition checks) for eventual consistency.
+- Avoid arbitrary sleeps unless testing negative/no-event windows.
+- Keep helper fixtures local to the test file and explicitly typed.
+- For touched changes, run `npm run test` (or targeted vitest) and finish with `npm run check`.

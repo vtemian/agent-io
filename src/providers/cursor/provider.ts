@@ -14,9 +14,11 @@ import { AGENT_SOURCE_KIND } from "@/domain";
 import { z } from "zod";
 import { resolveTranscriptDirectories, resolveTranscriptSourcePaths } from "./discovery";
 import { createCursorTranscriptSource, type CursorTranscriptSource } from "./transcripts";
+import { createCursorWatch, type CursorWatchOptions } from "./watch";
 
 export interface CursorTranscriptProviderOptions {
   sourceLabel?: string;
+  watch?: CursorWatchOptions | false;
 }
 
 const agentSourceSnapshotSchema = z.object({
@@ -42,6 +44,7 @@ export function createCursorTranscriptProvider(
   options: CursorTranscriptProviderOptions = {},
 ): TranscriptProvider {
   const sourceLabel = options.sourceLabel ?? AGENT_SOURCE_KIND.cursorTranscripts;
+  const watch = options.watch === false ? undefined : createCursorWatch(options.watch);
   let source: CursorTranscriptSource | undefined;
   let sourcePathKey = "";
   let connected = false;
@@ -132,6 +135,7 @@ export function createCursorTranscriptProvider(
     disconnect,
     read,
     normalize,
+    watch,
   };
 }
 

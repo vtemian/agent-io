@@ -12,3 +12,9 @@ export {
   type CursorTranscriptSource,
   type CursorTranscriptSourceOptions,
 } from "./transcripts";
+export {
+  createCursorWatch,
+  CURSOR_WATCH_DEBOUNCE_MS,
+  type CursorWatch,
+  type CursorWatchOptions,
+} from "./watch";

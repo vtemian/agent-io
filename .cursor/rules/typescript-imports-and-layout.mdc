@@ -1,0 +1,14 @@
+---
+description: TypeScript import and module layout conventions
+globs: src/**/*.ts
+alwaysApply: false
+---
+
+# TS Imports And Layout
+
+- Use `@/*` aliases for cross-folder imports.
+- Use `./` imports inside the same folder.
+- Avoid parent-relative imports (`../`) when `@/*` is appropriate.
+- Prefer `interface` for contracts and `type` for unions/aliases.
+- Re-export public APIs through `index.ts` barrel files.
+- Keep module order consistent: imports -> exports/types -> constants/schemas -> factory -> helpers.

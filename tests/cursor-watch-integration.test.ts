@@ -1,0 +1,142 @@
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+import { createObserver } from "@/index";
+import type { ObserverSnapshotEvent } from "@/core/observer";
+import { createCursorTranscriptProvider } from "@/providers/cursor";
+import { afterEach, describe, expect, it } from "vitest";
+
+describe("cursor watch integration", () => {
+  const cleanupPaths: string[] = [];
+  const observers: { stop(): Promise<void> }[] = [];
+
+  afterEach(async () => {
+    for (const obs of observers) {
+      await obs.stop().catch(() => {});
+    }
+    observers.length = 0;
+    for (const p of cleanupPaths) {
+      rmSync(p, { recursive: true, force: true });
+    }
+    cleanupPaths.length = 0;
+  });
+
+  it("observer re-reads transcripts when files change on disk", async () => {
+    const workspacePath = tmpWorkspace();
+    const transcriptDir = workspaceToTranscriptDir(workspacePath);
+    mkdirSync(transcriptDir, { recursive: true });
+    cleanupPaths.push(transcriptDir);
+
+    const transcriptPath = path.join(transcriptDir, "session-a.jsonl");
+    writeTranscriptRecord(transcriptPath, {
+      agentId: "agent-1",
+      agentName: "Agent One",
+      kind: "local",
+      status: "running",
+      task: "Initial task",
+      updatedAt: Date.now(),
+    });
+
+    const provider = createCursorTranscriptProvider({ watch: { debounceMs: 50 } });
+    const observer = createObserver({
+      provider,
+      workspacePaths: [workspacePath],
+      debounceMs: 50,
+    });
+    observers.push(observer);
+
+    const snapshots: ObserverSnapshotEvent[] = [];
+    observer.subscribeToSnapshots((event) => snapshots.push(event));
+
+    await observer.start();
+    await waitForSnapshotCount(snapshots, 1, 3000);
+    expect(snapshots[0].snapshot.agents.some((a) => a.id === "agent-1")).toBe(true);
+
+    writeTranscriptRecord(path.join(transcriptDir, "session-b.jsonl"), {
+      agentId: "agent-2",
+      agentName: "Agent Two",
+      kind: "local",
+      status: "running",
+      task: "New task from file change",
+      updatedAt: Date.now(),
+    });
+
+    await waitForSnapshotCount(snapshots, 2, 3000);
+    const latestSnapshot = snapshots[snapshots.length - 1];
+    expect(latestSnapshot.snapshot.agents.some((a) => a.id === "agent-2")).toBe(true);
+  });
+
+  it("observer with watch disabled does not re-read on file changes", async () => {
+    const workspacePath = tmpWorkspace();
+    const transcriptDir = workspaceToTranscriptDir(workspacePath);
+    mkdirSync(transcriptDir, { recursive: true });
+    cleanupPaths.push(transcriptDir);
+
+    writeTranscriptRecord(path.join(transcriptDir, "session.jsonl"), {
+      agentId: "agent-1",
+      agentName: "Agent One",
+      kind: "local",
+      status: "running",
+      task: "Initial task",
+      updatedAt: Date.now(),
+    });
+
+    const provider = createCursorTranscriptProvider({ watch: false });
+    const observer = createObserver({
+      provider,
+      workspacePaths: [workspacePath],
+    });
+    observers.push(observer);
+
+    const snapshots: ObserverSnapshotEvent[] = [];
+    observer.subscribeToSnapshots((event) => snapshots.push(event));
+
+    await observer.start();
+    await waitForSnapshotCount(snapshots, 1, 3000);
+
+    writeTranscriptRecord(path.join(transcriptDir, "session-b.jsonl"), {
+      agentId: "agent-2",
+      agentName: "Agent Two",
+      kind: "local",
+      status: "running",
+      task: "Should not appear automatically",
+      updatedAt: Date.now(),
+    });
+
+    await delay(500);
+    expect(snapshots).toHaveLength(1);
+  });
+});
+
+function tmpWorkspace(): string {
+  return path.join("/tmp", `cursor-watch-int-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+}
+
+function workspaceToTranscriptDir(workspacePath: string): string {
+  const workspaceId = path.resolve(workspacePath).replace(/^\/+/, "").split(/[\\/]/).join("-");
+  return path.join(homedir(), ".cursor", "projects", workspaceId, "agent-transcripts");
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function writeTranscriptRecord(filePath: string, record: Record<string, unknown>): void {
+  writeFileSync(filePath, `${JSON.stringify(record)}\n`, { encoding: "utf8", flag: "a" });
+}
+
+async function waitForSnapshotCount(
+  snapshots: unknown[],
+  count: number,
+  timeoutMs: number,
+): Promise<void> {
+  const start = Date.now();
+  while (snapshots.length < count) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(
+        `Expected ${count} snapshot(s), got ${snapshots.length} after ${timeoutMs}ms`,
+      );
+    }
+    await delay(50);
+  }
+}
