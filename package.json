@@ -1,12 +1,12 @@
 {
   "name": "@agentprobe/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Tool-agnostic watch runtime with transcript providers for coding agents.",
   "license": "MIT",
   "author": "Vlad Temian <vladtemian@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vtemian/agentprobe.git"
+    "url": "git+https://github.com/vtemian/agentprobe.git"
   },
   "homepage": "https://github.com/vtemian/agentprobe#readme",
   "bugs": {
