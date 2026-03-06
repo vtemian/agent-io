@@ -1,4 +1,4 @@
-import { readdirSync, statSync, type Dirent, type Stats } from "node:fs";
+import { readdirSync, statSync, type Stats } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -91,47 +91,30 @@ function collectTranscriptPaths(inputPaths: readonly string[]): DiscoveredTransc
 }
 
 function collectJsonlFilesRecursive(directory: string): DiscoveredTranscriptFile[] {
-  const collected: DiscoveredTranscriptFile[] = [];
-  const stack = [directory];
-
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (!current) {
-      continue;
-    }
-
-    let entries: Dirent[];
-    try {
-      entries = readdirSync(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      const entryPath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(entryPath);
-        continue;
-      }
-      if (entry.isFile() && entry.name.endsWith(TRANSCRIPT_FILE_EXTENSION)) {
-        const fileStats = readStats(entryPath);
-        if (!fileStats) {
-          continue;
-        }
-        collected.push({
-          path: entryPath,
-          mtimeMs: Math.round(fileStats.mtimeMs),
-        });
-      }
-    }
+  let entries: string[];
+  try {
+    entries = readdirSync(directory, { recursive: true, encoding: "utf-8" });
+  } catch {
+    return [];
   }
 
+  const collected: DiscoveredTranscriptFile[] = [];
+  for (const relative of entries) {
+    if (!relative.endsWith(TRANSCRIPT_FILE_EXTENSION)) {
+      continue;
+    }
+    const absolute = path.join(directory, relative);
+    const stats = tryStatSync(absolute);
+    if (stats?.isFile()) {
+      collected.push({ path: absolute, mtimeMs: Math.round(stats.mtimeMs) });
+    }
+  }
   return collected;
 }
 
-function readStats(entryPath: string): Stats | undefined {
+function tryStatSync(filePath: string): Stats | undefined {
   try {
-    return statSync(entryPath);
+    return statSync(filePath);
   } catch {
     return undefined;
   }
