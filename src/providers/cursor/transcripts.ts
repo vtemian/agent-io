@@ -1,16 +1,18 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import {
-  AGENT_KIND,
-  AGENT_SOURCE_KIND,
-  AGENT_STATUS,
-  type AgentKind,
-  type AgentSnapshot,
-  type AgentSourceReadResult,
-  type AgentStatus,
-} from "@/domain";
+  CANONICAL_AGENT_KIND,
+  CANONICAL_AGENT_STATUS,
+  type CanonicalAgentKind,
+  type CanonicalAgentSnapshot,
+  type CanonicalAgentStatus,
+} from "@/core/model";
 import { z } from "zod";
-import { AGENT_COMPLETION_QUIET_WINDOW_MS } from "./constants";
+import {
+  AGENT_COMPLETION_QUIET_WINDOW_MS,
+  CURSOR_SOURCE_KIND,
+  STREAMING_QUIET_WINDOW_MS,
+} from "./constants";
 
 interface CursorTranscriptRecord {
   agentId: string;
@@ -35,8 +37,8 @@ const nonEmptyStringSchema = z
   .pipe(z.string().min(1));
 
 const finiteNumberSchema = z.number().refine(Number.isFinite);
-const agentStatusSchema = z.nativeEnum(AGENT_STATUS);
-const agentKindSchema = z.nativeEnum(AGENT_KIND);
+const agentStatusSchema = z.nativeEnum(CANONICAL_AGENT_STATUS);
+const agentKindSchema = z.nativeEnum(CANONICAL_AGENT_KIND);
 
 const flatTranscriptRecordSchema = z.object({
   agentId: nonEmptyStringSchema,
@@ -53,6 +55,24 @@ const conversationContentEntrySchema = z.object({
   text: z.string().optional(),
 });
 
+interface TranscriptParseState {
+  latestUserTask: string | undefined;
+  sawConversationRecord: boolean;
+  latestConversationSignal: ConversationSignal | undefined;
+  latestConversationRole: string | undefined;
+  sawUserTurn: boolean;
+  hasAssistantReplyAfterLatestUser: boolean;
+  flatAgents: CanonicalAgentSnapshot[];
+}
+
+interface TranscriptFileCache {
+  mtimeMs: number;
+  sizeBytes: number;
+  lineCount: number;
+  state: TranscriptParseState;
+  fileUpdatedAt: number;
+}
+
 const RUNNING_WINDOW_MS = 60_000;
 const IDLE_WINDOW_MS = 5 * 60_000;
 
@@ -65,16 +85,23 @@ const conversationLineSchema = z.object({
     .optional(),
 });
 
+export interface TranscriptSourceResult {
+  agents: CanonicalAgentSnapshot[];
+  connected: boolean;
+  sourceLabel: string;
+  warnings: string[];
+}
+
 export interface CursorTranscriptSourceOptions {
   sourcePaths: string[];
   sourceLabel?: string;
 }
 
 export interface CursorTranscriptSource {
-  readonly sourceKind: typeof AGENT_SOURCE_KIND.cursorTranscripts;
+  readonly sourceKind: typeof CURSOR_SOURCE_KIND;
   connect(): Promise<void> | void;
   disconnect(): Promise<void> | void;
-  readSnapshot(now?: number): Promise<AgentSourceReadResult> | AgentSourceReadResult;
+  readSnapshot(now?: number): Promise<TranscriptSourceResult> | TranscriptSourceResult;
   getWatchPaths?(): string[];
 }
 
@@ -82,8 +109,9 @@ export function createCursorTranscriptSource(
   options: CursorTranscriptSourceOptions,
 ): CursorTranscriptSource {
   const sourcePaths = Array.isArray(options.sourcePaths) ? [...options.sourcePaths] : [];
-  const sourceLabel = options.sourceLabel ?? AGENT_SOURCE_KIND.cursorTranscripts;
+  const sourceLabel = options.sourceLabel ?? CURSOR_SOURCE_KIND;
   let connected = false;
+  const fileCache = new Map<string, TranscriptFileCache>();
 
   function connect(): void {
     connected = true;
@@ -91,9 +119,10 @@ export function createCursorTranscriptSource(
 
   function disconnect(): void {
     connected = false;
+    fileCache.clear();
   }
 
-  async function readSnapshot(now: number = Date.now()): Promise<AgentSourceReadResult> {
+  async function readSnapshot(now: number = Date.now()): Promise<TranscriptSourceResult> {
     if (!connected) {
       return {
         agents: [],
@@ -114,19 +143,48 @@ export function createCursorTranscriptSource(
 
     const warnings: string[] = [];
     const orderedIds: string[] = [];
-    const latestById = new Map<string, AgentSnapshot>();
+    const latestById = new Map<string, CanonicalAgentSnapshot>();
     let hasReadError = false;
     let successfulReads = 0;
 
     for (const sourcePath of sourcePaths) {
-      let contents: string;
       let fileUpdatedAt = now;
+      let fileSizeBytes = 0;
       try {
         const stats = await stat(sourcePath);
         fileUpdatedAt = Math.round(stats.mtimeMs);
+        fileSizeBytes = stats.size;
       } catch {
         // Keep default now timestamp when stat access fails.
       }
+
+      const cached = fileCache.get(sourcePath);
+
+      if (cached && cached.mtimeMs === fileUpdatedAt) {
+        successfulReads += 1;
+        mergeAgents(
+          resolveAgentsFromState(cached.state, sourcePath, cached.fileUpdatedAt, now),
+          orderedIds,
+          latestById,
+        );
+        continue;
+      }
+
+      const contentChanged = !cached || fileSizeBytes !== cached.sizeBytes;
+      const effectiveUpdatedAt = contentChanged ? fileUpdatedAt : cached.fileUpdatedAt;
+
+      if (cached && !contentChanged) {
+        successfulReads += 1;
+        fileCache.set(sourcePath, { ...cached, mtimeMs: fileUpdatedAt });
+        mergeAgents(
+          resolveAgentsFromState(cached.state, sourcePath, effectiveUpdatedAt, now),
+          orderedIds,
+          latestById,
+        );
+        continue;
+      }
+
+      let contents: string;
       try {
         contents = await readFile(sourcePath, "utf8");
         successfulReads += 1;
@@ -136,24 +194,40 @@ export function createCursorTranscriptSource(
         continue;
       }
 
-      const parsedAgents = parseTranscriptFile(contents, sourcePath, warnings, fileUpdatedAt, now);
-      for (const parsedAgent of parsedAgents) {
-        const existing = latestById.get(parsedAgent.id);
-        if (!existing) {
-          latestById.set(parsedAgent.id, parsedAgent);
-          orderedIds.push(parsedAgent.id);
-          continue;
-        }
+      const lines = contents.split(/\r?\n/);
+      let state: TranscriptParseState;
+      let startLine: number;
 
-        if (parsedAgent.updatedAt > existing.updatedAt) {
-          latestById.set(parsedAgent.id, parsedAgent);
-        }
+      if (cached && fileSizeBytes >= cached.sizeBytes && lines.length >= cached.lineCount) {
+        state = cloneParseState(cached.state);
+        startLine = cached.lineCount;
+      } else {
+        state = createInitialParseState();
+        startLine = 0;
       }
+
+      accumulateLines(state, lines, startLine, sourcePath, warnings);
+
+      fileCache.set(sourcePath, {
+        mtimeMs: fileUpdatedAt,
+        sizeBytes: fileSizeBytes,
+        lineCount: lines.length,
+        state: cloneParseState(state),
+        fileUpdatedAt: effectiveUpdatedAt,
+      });
+
+      mergeAgents(
+        resolveAgentsFromState(state, sourcePath, effectiveUpdatedAt, now),
+        orderedIds,
+        latestById,
+      );
     }
+
+    pruneStaleEntries(fileCache, sourcePaths);
 
     const agents = orderedIds
       .map((id) => latestById.get(id))
-      .filter((agent): agent is AgentSnapshot => Boolean(agent));
+      .filter((agent): agent is CanonicalAgentSnapshot => agent !== undefined);
 
     return {
       agents,
@@ -163,129 +237,8 @@ export function createCursorTranscriptSource(
     };
   }
 
-  function parseTranscriptFile(
-    contents: string,
-    sourcePath: string,
-    warnings: string[],
-    fileUpdatedAt: number,
-    now: number,
-  ): AgentSnapshot[] {
-    const lines = contents.split(/\r?\n/);
-    const agents: AgentSnapshot[] = [];
-    let latestUserTask: string | undefined;
-    let sawConversationRecord = false;
-    let latestConversationSignal: ConversationSignal | undefined;
-    let latestConversationRole: string | undefined;
-    let sawUserTurn = false;
-    let hasAssistantReplyAfterLatestUser = false;
-
-    for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
-      const rawLine = lines[lineNumber];
-      const line = rawLine.trim();
-      if (line.length === 0) {
-        continue;
-      }
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        warnings.push(formatLineWarning(sourcePath, lineNumber + 1, "Invalid JSON line."));
-        continue;
-      }
-
-      const record = parseFlatRecord(parsed);
-      if (!record) {
-        const conversationRecord = parseConversationRecord(parsed);
-        if (!conversationRecord) {
-          warnings.push(
-            formatLineWarning(sourcePath, lineNumber + 1, "Unrecognized transcript record."),
-          );
-          continue;
-        }
-        sawConversationRecord = true;
-        latestConversationRole = conversationRecord.role;
-        if (conversationRecord.role === "user" && conversationRecord.text) {
-          latestUserTask = sanitizeTaskSummary(conversationRecord.text);
-          latestConversationSignal = "active";
-          sawUserTurn = true;
-          hasAssistantReplyAfterLatestUser = false;
-        }
-        if (conversationRecord.text) {
-          if (isAssistantRole(conversationRecord.role)) {
-            if (sawUserTurn) {
-              hasAssistantReplyAfterLatestUser = true;
-            }
-            const signal = deriveConversationSignal(conversationRecord.text);
-            if (signal) {
-              latestConversationSignal = signal;
-            }
-          }
-        }
-        continue;
-      }
-
-      const statusResult = agentStatusSchema.safeParse(record.status);
-      if (!statusResult.success) {
-        warnings.push(formatLineWarning(sourcePath, lineNumber + 1, "Invalid agent status."));
-        continue;
-      }
-
-      const kindResult = parseAgentKind(record.kind);
-      if (!kindResult.success) {
-        warnings.push(formatLineWarning(sourcePath, lineNumber + 1, "Invalid agent kind."));
-        continue;
-      }
-
-      const snapshot: AgentSnapshot = {
-        id: record.agentId,
-        name: record.agentName,
-        kind: kindResult.value,
-        isSubagent: isSubagentPath(sourcePath),
-        status: statusResult.data,
-        taskSummary: record.task,
-        updatedAt: record.updatedAt,
-        source: AGENT_SOURCE_KIND.cursorTranscripts,
-      };
-
-      if (typeof record.startedAt === "number") {
-        snapshot.startedAt = record.startedAt;
-      }
-
-      agents.push(snapshot);
-    }
-
-    if (agents.length > 0 || !sawConversationRecord) {
-      return agents;
-    }
-
-    const agentId = deriveAgentId(sourcePath);
-    return [
-      {
-        id: agentId,
-        name: deriveAgentName(agentId, sourcePath),
-        kind: AGENT_KIND.local,
-        isSubagent: isSubagentPath(sourcePath),
-        status: deriveConversationStatus(
-          now,
-          fileUpdatedAt,
-          latestConversationSignal,
-          latestConversationRole,
-          hasAssistantReplyAfterLatestUser,
-        ),
-        taskSummary: latestUserTask ?? "Working",
-        updatedAt: fileUpdatedAt,
-        source: AGENT_SOURCE_KIND.cursorTranscripts,
-      },
-    ];
-  }
-
-  function formatLineWarning(sourcePath: string, lineNumber: number, reason: string): string {
-    return `${sourcePath}:${lineNumber} ${reason}`;
-  }
-
   return {
-    sourceKind: AGENT_SOURCE_KIND.cursorTranscripts,
+    sourceKind: CURSOR_SOURCE_KIND,
     connect,
     disconnect,
     readSnapshot,
@@ -295,6 +248,196 @@ export function createCursorTranscriptSource(
   };
 }
 
+// --- Parse state management ---
+
+function createInitialParseState(): TranscriptParseState {
+  return {
+    latestUserTask: undefined,
+    sawConversationRecord: false,
+    latestConversationSignal: undefined,
+    latestConversationRole: undefined,
+    sawUserTurn: false,
+    hasAssistantReplyAfterLatestUser: false,
+    flatAgents: [],
+  };
+}
+
+function cloneParseState(state: TranscriptParseState): TranscriptParseState {
+  return { ...state, flatAgents: [...state.flatAgents] };
+}
+
+// --- Incremental line parser ---
+
+function accumulateLines(
+  state: TranscriptParseState,
+  lines: string[],
+  startIndex: number,
+  sourcePath: string,
+  warnings: string[],
+): void {
+  for (let i = startIndex; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.length === 0) {
+      continue;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      warnings.push(formatLineWarning(sourcePath, i + 1, "Invalid JSON line."));
+      continue;
+    }
+
+    const record = parseFlatRecord(parsed);
+    if (!record) {
+      accumulateConversationLine(state, parsed, sourcePath, warnings, i);
+      continue;
+    }
+
+    accumulateFlatRecord(state, record, sourcePath, warnings, i);
+  }
+}
+
+function accumulateConversationLine(
+  state: TranscriptParseState,
+  parsed: unknown,
+  sourcePath: string,
+  warnings: string[],
+  lineIndex: number,
+): void {
+  const conversationRecord = parseConversationRecord(parsed);
+  if (!conversationRecord) {
+    warnings.push(formatLineWarning(sourcePath, lineIndex + 1, "Unrecognized transcript record."));
+    return;
+  }
+
+  state.sawConversationRecord = true;
+  state.latestConversationRole = conversationRecord.role;
+
+  if (conversationRecord.role === "user" && conversationRecord.text) {
+    state.latestUserTask = sanitizeTaskSummary(conversationRecord.text);
+    state.latestConversationSignal = "active";
+    state.sawUserTurn = true;
+    state.hasAssistantReplyAfterLatestUser = false;
+  }
+
+  if (conversationRecord.text && isAssistantRole(conversationRecord.role)) {
+    if (state.sawUserTurn) {
+      state.hasAssistantReplyAfterLatestUser = true;
+    }
+    const signal = deriveConversationSignal(conversationRecord.text);
+    if (signal) {
+      state.latestConversationSignal = signal;
+    }
+  }
+}
+
+function accumulateFlatRecord(
+  state: TranscriptParseState,
+  record: CursorTranscriptRecord,
+  sourcePath: string,
+  warnings: string[],
+  lineIndex: number,
+): void {
+  const statusResult = agentStatusSchema.safeParse(record.status);
+  if (!statusResult.success) {
+    warnings.push(formatLineWarning(sourcePath, lineIndex + 1, "Invalid agent status."));
+    return;
+  }
+
+  const kindResult = parseAgentKind(record.kind);
+  if (!kindResult.success) {
+    warnings.push(formatLineWarning(sourcePath, lineIndex + 1, "Invalid agent kind."));
+    return;
+  }
+
+  const snapshot: CanonicalAgentSnapshot = {
+    id: record.agentId,
+    name: record.agentName,
+    kind: kindResult.value,
+    isSubagent: isSubagentPath(sourcePath),
+    status: statusResult.data,
+    taskSummary: record.task,
+    updatedAt: record.updatedAt,
+    source: CURSOR_SOURCE_KIND,
+  };
+
+  if (typeof record.startedAt === "number") {
+    snapshot.startedAt = record.startedAt;
+  }
+
+  state.flatAgents.push(snapshot);
+}
+
+// --- Agent resolution ---
+
+function resolveAgentsFromState(
+  state: TranscriptParseState,
+  sourcePath: string,
+  fileUpdatedAt: number,
+  now: number,
+): CanonicalAgentSnapshot[] {
+  if (state.flatAgents.length > 0 || !state.sawConversationRecord) {
+    return state.flatAgents;
+  }
+
+  const agentId = deriveAgentId(sourcePath);
+  return [
+    {
+      id: agentId,
+      name: deriveAgentName(agentId, sourcePath),
+      kind: CANONICAL_AGENT_KIND.local,
+      isSubagent: isSubagentPath(sourcePath),
+      status: deriveConversationStatus(
+        now,
+        fileUpdatedAt,
+        state.latestConversationSignal,
+        state.latestConversationRole,
+        state.hasAssistantReplyAfterLatestUser,
+      ),
+      taskSummary: state.latestUserTask ?? "Working",
+      updatedAt: fileUpdatedAt,
+      source: CURSOR_SOURCE_KIND,
+    },
+  ];
+}
+
+// --- Merge and cache helpers ---
+
+function mergeAgents(
+  agents: CanonicalAgentSnapshot[],
+  orderedIds: string[],
+  latestById: Map<string, CanonicalAgentSnapshot>,
+): void {
+  for (const agent of agents) {
+    const existing = latestById.get(agent.id);
+    if (!existing) {
+      latestById.set(agent.id, agent);
+      orderedIds.push(agent.id);
+    } else if (agent.updatedAt > existing.updatedAt) {
+      latestById.set(agent.id, agent);
+    }
+  }
+}
+
+function pruneStaleEntries(
+  cache: Map<string, TranscriptFileCache>,
+  currentPaths: readonly string[],
+): void {
+  if (cache.size <= currentPaths.length) {
+    return;
+  }
+  const current = new Set(currentPaths);
+  for (const key of cache.keys()) {
+    if (!current.has(key)) {
+      cache.delete(key);
+    }
+  }
+}
+
+// --- Record parsing ---
+
 function parseFlatRecord(value: unknown): CursorTranscriptRecord | null {
   const parsed = flatTranscriptRecordSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
@@ -302,9 +445,9 @@ function parseFlatRecord(value: unknown): CursorTranscriptRecord | null {
 
 function parseAgentKind(
   value: string | undefined,
-): { success: true; value: AgentKind } | { success: false } {
+): { success: true; value: CanonicalAgentKind } | { success: false } {
   if (value === undefined) {
-    return { success: true, value: AGENT_KIND.local };
+    return { success: true, value: CANONICAL_AGENT_KIND.local };
   }
   const parsed = agentKindSchema.safeParse(value);
   return parsed.success ? { success: true, value: parsed.data } : { success: false };
@@ -315,28 +458,25 @@ function parseConversationRecord(value: unknown): ConversationTranscriptRecord |
   if (!parsed.success) {
     return null;
   }
-  const role = parsed.data.role;
-  const entries = parsed.data.message?.content ?? [];
-  const textParts: string[] = [];
-  for (const entry of entries) {
-    if (entry.type !== "text" || typeof entry.text !== "string") {
-      continue;
-    }
-    const text = entry.text.trim();
-    if (text.length > 0) {
-      textParts.push(text);
-    }
-  }
-  if (textParts.length > 0) {
-    return { role, text: textParts.join("\n") };
-  }
-  return { role };
+  const { role } = parsed.data;
+  const text = (parsed.data.message?.content ?? [])
+    .filter((entry) => entry.type === "text" && typeof entry.text === "string")
+    .map((entry) => entry.text?.trim() ?? "")
+    .filter((part) => part.length > 0)
+    .join("\n");
+  return text.length > 0 ? { role, text } : { role };
 }
+
+// --- Text analysis ---
 
 function sanitizeTaskSummary(value: string): string {
   const match = value.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/i);
   const query = match ? match[1] : value;
   return query.replace(/\s+/g, " ").trim();
+}
+
+function formatLineWarning(sourcePath: string, lineNumber: number, reason: string): string {
+  return `${sourcePath}:${lineNumber} ${reason}`;
 }
 
 function hasErrorMarker(value: string): boolean {
@@ -349,34 +489,46 @@ function deriveConversationStatus(
   latestSignal: ConversationSignal | undefined,
   latestRole: string | undefined,
   hasAssistantReplyAfterLatestUser: boolean,
-): AgentStatus {
+): CanonicalAgentStatus {
   if (latestSignal === "error") {
-    return AGENT_STATUS.error;
+    return CANONICAL_AGENT_STATUS.error;
   }
   if (latestSignal === "completed") {
-    return AGENT_STATUS.completed;
+    return CANONICAL_AGENT_STATUS.completed;
   }
+
   const ageMs = Math.max(0, now - updatedAt);
+  const assistantDone =
+    hasAssistantReplyAfterLatestUser &&
+    isAssistantRole(latestRole ?? "") &&
+    latestSignal !== "active";
+
+  if (assistantDone) {
+    if (ageMs <= STREAMING_QUIET_WINDOW_MS) {
+      return CANONICAL_AGENT_STATUS.running;
+    }
+    if (ageMs <= AGENT_COMPLETION_QUIET_WINDOW_MS) {
+      return CANONICAL_AGENT_STATUS.idle;
+    }
+    return CANONICAL_AGENT_STATUS.completed;
+  }
+
   if (ageMs <= RUNNING_WINDOW_MS) {
-    return AGENT_STATUS.running;
+    return CANONICAL_AGENT_STATUS.running;
   }
   if (latestSignal === "active" && !hasAssistantReplyAfterLatestUser) {
     if (ageMs <= IDLE_WINDOW_MS) {
-      return AGENT_STATUS.idle;
+      return CANONICAL_AGENT_STATUS.idle;
     }
-    return AGENT_STATUS.completed;
-  }
-  if (hasAssistantReplyAfterLatestUser && isAssistantRole(latestRole ?? "")) {
-    if (ageMs <= AGENT_COMPLETION_QUIET_WINDOW_MS) {
-      return AGENT_STATUS.idle;
-    }
-    return AGENT_STATUS.completed;
+    return CANONICAL_AGENT_STATUS.completed;
   }
   if (ageMs <= IDLE_WINDOW_MS) {
-    return AGENT_STATUS.idle;
+    return CANONICAL_AGENT_STATUS.idle;
   }
-  return AGENT_STATUS.completed;
+  return CANONICAL_AGENT_STATUS.completed;
 }
+
+// --- Path helpers ---
 
 function deriveAgentId(sourcePath: string): string {
   const fileName = path.basename(sourcePath, ".jsonl");
@@ -395,6 +547,8 @@ function isSubagentPath(sourcePath: string): boolean {
 function isAssistantRole(role: string): boolean {
   return role === "assistant";
 }
+
+// --- Signal detection ---
 
 function deriveConversationSignal(value: string): ConversationSignal | undefined {
   const normalized = value.toLowerCase();
@@ -422,13 +576,13 @@ function hasCompletionMarker(value: string): boolean {
   if (hasNegativeCompletion) {
     return false;
   }
-  return /\b(done|completed|implemented|finished|all set|ready to test|ready for testing|gata|terminat|finalizat|cu succes)\b/.test(
+  return /\b(done|complete|completed|implemented|finished|all set|ready to test|ready for testing|gata|terminat|finalizat|cu succes)\b/.test(
     normalized,
   );
 }
 
 function hasInProgressMarker(normalizedValue: string): boolean {
-  return /\b(running command|processing|batch|step\s+\d+|in execut|executing|sleep\(|task start|still running)\b/.test(
+  return /\b(running command|executing command|sleep\(|task start|still running)\b/.test(
     normalizedValue,
   );
 }

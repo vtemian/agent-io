@@ -1,22 +1,28 @@
 import { createObserver } from "@agentprobe/core";
 
 const DURATION_MS = 2 * 60 * 1000;
+let lastSnapshotAt = 0;
 
 async function main(): Promise<void> {
   const observer = createObserver({
     workspacePaths: [process.argv[2] ?? process.cwd()],
-    debounceMs: 25,
   });
 
   observer.subscribeToSnapshots((event) => {
+    const now = performance.now();
+    const delta = lastSnapshotAt > 0 ? `+${(now - lastSnapshotAt).toFixed(0)}ms` : "init";
+    lastSnapshotAt = now;
+
     const running = event.snapshot.agents.filter((a) => a.status === "running");
+    const total = event.snapshot.agents.length;
+
     if (running.length === 0) {
-      console.log(`[${ts()}] No running agents`);
+      console.log(`[${ts()}] (${delta}) ${total} agents, none running`);
       return;
     }
-    console.log(`[${ts()}] ${running.length} running agent(s):`);
+    console.log(`[${ts()}] (${delta}) ${running.length}/${total} running:`);
     for (const agent of running) {
-      console.log(`  ${agent.id.slice(0, 8)} | ${agent.name} | ${agent.taskSummary.slice(0, 80)}`);
+      console.log(`  ${agent.id.slice(0, 8)} | ${agent.taskSummary.slice(0, 80)}`);
     }
   });
 
@@ -30,7 +36,7 @@ async function main(): Promise<void> {
 }
 
 function ts(): string {
-  return new Date().toISOString().slice(11, 19);
+  return new Date().toISOString().slice(11, 23);
 }
 
 void main();

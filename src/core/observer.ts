@@ -264,9 +264,5 @@ function mergeSnapshotWarnings(
 }
 
 function indexAgentsById(agents: CanonicalAgentSnapshot[]): Map<string, CanonicalAgentSnapshot> {
-  const byId = new Map<string, CanonicalAgentSnapshot>();
-  for (const agent of agents) {
-    byId.set(agent.id, agent);
-  }
-  return byId;
+  return new Map(agents.map((agent) => [agent.id, agent]));
 }

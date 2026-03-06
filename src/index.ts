@@ -71,6 +71,7 @@ export {
   type CursorTranscriptProviderOptions,
   type CursorTranscriptSource,
   type CursorTranscriptSourceOptions,
+  type TranscriptSourceResult,
   type CursorWatch,
   type CursorWatchOptions,
   type TranscriptDiscoveryOptions,

@@ -11,6 +11,7 @@ export {
   createCursorTranscriptSource,
   type CursorTranscriptSource,
   type CursorTranscriptSourceOptions,
+  type TranscriptSourceResult,
 } from "./transcripts";
 export {
   createCursorWatch,

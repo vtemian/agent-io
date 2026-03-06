@@ -118,6 +118,39 @@ describe("cursor transcripts", () => {
     expect(snapshot.agents[0]?.id).toBe("a2");
   });
 
+  it("detects 'thinking' / 'thinking steps' as active (in-progress)", async () => {
+    const baseDir = createTempDir("thinking");
+    const transcriptPath = path.join(baseDir, "session.jsonl");
+    writeFileSync(
+      transcriptPath,
+      [
+        JSON.stringify({
+          role: "user",
+          message: {
+            content: [{ type: "text", text: "<user_query>debug small story</user_query>" }],
+          },
+        }),
+        JSON.stringify({
+          role: "assistant",
+          message: {
+            content: [
+              { type: "text", text: "Thinking steps is not detected. Let me investigate..." },
+            ],
+          },
+        }),
+      ].join("\n"),
+      "utf8",
+    );
+
+    const source = createCursorTranscriptSource({ sourcePaths: [transcriptPath] });
+    source.connect();
+    const snapshot = await source.readSnapshot(Date.now() + 30_000);
+
+    expect(snapshot.agents).toHaveLength(1);
+    expect(snapshot.agents[0]?.status).toBe("running");
+    expect(snapshot.agents[0]?.taskSummary).toBe("debug small story");
+  });
+
   it("emits warnings for unrecognized json object lines", async () => {
     const baseDir = createTempDir("warning");
     const transcriptPath = path.join(baseDir, "session.jsonl");

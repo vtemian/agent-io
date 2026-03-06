@@ -1,6 +1,4 @@
 import {
-  CANONICAL_AGENT_KIND,
-  CANONICAL_AGENT_STATUS,
   PROVIDER_KINDS,
   type CanonicalAgentSnapshot,
   type CanonicalSnapshot,
@@ -9,58 +7,50 @@ import {
   type TranscriptProvider,
   type TranscriptReadResult,
 } from "@/core";
-import type { AgentKind, AgentSourceReadResult, AgentStatus } from "@/domain";
-import { AGENT_SOURCE_KIND } from "@/domain";
-import { z } from "zod";
-import { resolveTranscriptDirectories, resolveTranscriptSourcePaths } from "./discovery";
-import { createCursorTranscriptSource, type CursorTranscriptSource } from "./transcripts";
+import {
+  listTranscriptFileNames,
+  resolveTranscriptDirectories,
+  resolveTranscriptSourcePaths,
+} from "./discovery";
+import {
+  createCursorTranscriptSource,
+  type CursorTranscriptSource,
+  type TranscriptSourceResult,
+} from "./transcripts";
 import { createCursorWatch, type CursorWatchOptions } from "./watch";
+import { CURSOR_SOURCE_KIND } from "./constants";
 
 export interface CursorTranscriptProviderOptions {
   sourceLabel?: string;
   watch?: CursorWatchOptions | false;
 }
 
-const agentSourceSnapshotSchema = z.object({
-  agents: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      kind: z.enum(["local", "remote"]),
-      isSubagent: z.boolean(),
-      status: z.enum(["running", "idle", "completed", "error"]),
-      taskSummary: z.string(),
-      startedAt: z.number().optional(),
-      updatedAt: z.number(),
-      source: z.string(),
-    }),
-  ),
-  connected: z.boolean(),
-  sourceLabel: z.string(),
-  warnings: z.array(z.string()),
-});
-
 export function createCursorTranscriptProvider(
   options: CursorTranscriptProviderOptions = {},
 ): TranscriptProvider {
-  const sourceLabel = options.sourceLabel ?? AGENT_SOURCE_KIND.cursorTranscripts;
+  const sourceLabel = options.sourceLabel ?? CURSOR_SOURCE_KIND;
   const watch = options.watch === false ? undefined : createCursorWatch(options.watch);
   let source: CursorTranscriptSource | undefined;
   let sourcePathKey = "";
   let connected = false;
+  let cachedDiscovery: DiscoveryResult | undefined;
+  let cachedFileList: string[] | undefined;
 
   function discover(workspacePaths: string[]): DiscoveryResult {
+    const currentFileList = listTranscriptFileNames({ workspacePaths });
+    if (cachedDiscovery && cachedFileList && arraysEqual(currentFileList, cachedFileList)) {
+      return cachedDiscovery;
+    }
+
     const watchPaths = resolveTranscriptDirectories({ workspacePaths });
     const sourcePaths = resolveTranscriptSourcePaths({ workspacePaths });
     const inputs: DiscoveryInput[] = sourcePaths.map((sourcePath) => ({
       uri: sourcePath,
       kind: "file",
     }));
-    return {
-      inputs,
-      watchPaths,
-      warnings: [],
-    };
+    cachedDiscovery = { inputs, watchPaths, warnings: [] };
+    cachedFileList = currentFileList;
+    return cachedDiscovery;
   }
 
   function connect(): void {
@@ -71,6 +61,8 @@ export function createCursorTranscriptProvider(
   function disconnect(): void {
     connected = false;
     source?.disconnect();
+    cachedDiscovery = undefined;
+    cachedFileList = undefined;
   }
 
   async function read(
@@ -103,29 +95,11 @@ export function createCursorTranscriptProvider(
   }
 
   function normalize(readResult: TranscriptReadResult): CanonicalSnapshot {
-    const snapshot = readResult.records
-      .map((record) => record.payload)
-      .find(
-        (payload): payload is AgentSourceReadResult =>
-          agentSourceSnapshotSchema.safeParse(payload).success,
-      );
-
-    const agents: CanonicalAgentSnapshot[] = (snapshot?.agents ?? []).map((agent) => ({
-      id: agent.id,
-      name: agent.name,
-      kind: normalizeAgentKind(agent.kind),
-      isSubagent: agent.isSubagent,
-      status: normalizeAgentStatus(agent.status),
-      taskSummary: agent.taskSummary,
-      startedAt: agent.startedAt,
-      updatedAt: agent.updatedAt,
-      source: agent.source,
-    }));
-
-    return {
-      agents,
-      health: readResult.health,
-    };
+    const payload = readResult.records[0]?.payload;
+    const agents: CanonicalAgentSnapshot[] = isTranscriptSourceResult(payload)
+      ? payload.agents
+      : [];
+    return { agents, health: readResult.health };
   }
 
   return {
@@ -152,24 +126,20 @@ function ensureSource(
   return createCursorTranscriptSource({ sourcePaths, sourceLabel });
 }
 
-function normalizeAgentKind(kind: AgentKind): CanonicalAgentSnapshot["kind"] {
-  switch (kind) {
-    case "remote":
-      return CANONICAL_AGENT_KIND.remote;
-    case "local":
-      return CANONICAL_AGENT_KIND.local;
-  }
+function isTranscriptSourceResult(value: unknown): value is TranscriptSourceResult {
+  return (
+    typeof value === "object" && value !== null && "agents" in value && Array.isArray(value.agents)
+  );
 }
 
-function normalizeAgentStatus(status: AgentStatus): CanonicalAgentSnapshot["status"] {
-  switch (status) {
-    case "error":
-      return CANONICAL_AGENT_STATUS.error;
-    case "completed":
-      return CANONICAL_AGENT_STATUS.completed;
-    case "idle":
-      return CANONICAL_AGENT_STATUS.idle;
-    case "running":
-      return CANONICAL_AGENT_STATUS.running;
+function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) {
+    return false;
   }
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
 }

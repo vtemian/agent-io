@@ -32,10 +32,8 @@ export function createRuntimeSubscriptions(options: RuntimeSubscriptionsOptions)
   clearResubscribeTimers(): void;
 } {
   const subscriptions: ChangeSubscription[] = [];
-  const resubscribeState = new Map<
-    string,
-    { timer: ReturnType<typeof globalThis.setTimeout>; attempts: number }
-  >();
+  const pendingTimers = new Map<string, ReturnType<typeof globalThis.setTimeout>>();
+  const resubscribeAttempts = new Map<string, number>();
   let debounceTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
 
   function initializeSubscriptions(token: number): void {
@@ -142,39 +140,41 @@ export function createRuntimeSubscriptions(options: RuntimeSubscriptionsOptions)
       return;
     }
 
-    if (resubscribeState.has(watchPath)) {
+    if (pendingTimers.has(watchPath)) {
       return;
     }
 
-    const previousAttempts = resubscribeState.get(watchPath)?.attempts ?? 0;
-    const attempts = previousAttempts + 1;
+    const attempts = (resubscribeAttempts.get(watchPath) ?? 0) + 1;
+    resubscribeAttempts.set(watchPath, attempts);
     const delayMs = Math.min(
       WATCH_RESUBSCRIBE_BASE_DELAY_MS * 2 ** Math.max(0, attempts - 1),
       WATCH_RESUBSCRIBE_MAX_DELAY_MS,
     );
     const timer = globalThis.setTimeout(() => {
-      resubscribeState.delete(watchPath);
+      pendingTimers.delete(watchPath);
       if (!options.isStartedWithToken(token)) {
         return;
       }
       resubscribeWatchPath(watchPath, token);
     }, delayMs);
-    resubscribeState.set(watchPath, { timer, attempts });
+    pendingTimers.set(watchPath, timer);
   }
 
   function clearResubscribeStateForPath(watchPath: string): void {
-    const entry = resubscribeState.get(watchPath);
-    if (entry) {
-      globalThis.clearTimeout(entry.timer);
-      resubscribeState.delete(watchPath);
+    const timer = pendingTimers.get(watchPath);
+    if (timer !== undefined) {
+      globalThis.clearTimeout(timer);
+      pendingTimers.delete(watchPath);
     }
+    resubscribeAttempts.delete(watchPath);
   }
 
   function clearResubscribeTimers(): void {
-    for (const entry of resubscribeState.values()) {
-      globalThis.clearTimeout(entry.timer);
+    for (const timer of pendingTimers.values()) {
+      globalThis.clearTimeout(timer);
     }
-    resubscribeState.clear();
+    pendingTimers.clear();
+    resubscribeAttempts.clear();
   }
 
   function unsubscribeByWatchPath(watchPath: string): void {

@@ -98,18 +98,13 @@ function collectJsonlFilesRecursive(directory: string): DiscoveredTranscriptFile
     return [];
   }
 
-  const collected: DiscoveredTranscriptFile[] = [];
-  for (const relative of entries) {
-    if (!relative.endsWith(TRANSCRIPT_FILE_EXTENSION)) {
-      continue;
-    }
-    const absolute = path.join(directory, relative);
-    const stats = tryStatSync(absolute);
-    if (stats?.isFile()) {
-      collected.push({ path: absolute, mtimeMs: Math.round(stats.mtimeMs) });
-    }
-  }
-  return collected;
+  return entries
+    .filter((relative) => relative.endsWith(TRANSCRIPT_FILE_EXTENSION))
+    .flatMap((relative) => {
+      const absolute = path.join(directory, relative);
+      const stats = tryStatSync(absolute);
+      return stats?.isFile() ? [{ path: absolute, mtimeMs: Math.round(stats.mtimeMs) }] : [];
+    });
 }
 
 function tryStatSync(filePath: string): Stats | undefined {
@@ -118,6 +113,24 @@ function tryStatSync(filePath: string): Stats | undefined {
   } catch {
     return undefined;
   }
+}
+
+export function listTranscriptFileNames(options: TranscriptDiscoveryOptions): string[] {
+  const directories = resolveTranscriptDirectories(options);
+  const collected: string[] = [];
+  for (const directory of directories) {
+    try {
+      const entries = readdirSync(directory, { recursive: true, encoding: "utf-8" });
+      for (const entry of entries) {
+        if (entry.endsWith(TRANSCRIPT_FILE_EXTENSION)) {
+          collected.push(path.join(directory, entry));
+        }
+      }
+    } catch {
+      // Directory might not exist yet.
+    }
+  }
+  return dedupePaths(collected).sort();
 }
 
 function dedupePaths(paths: readonly string[]): string[] {

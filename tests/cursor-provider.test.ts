@@ -18,7 +18,7 @@ describe("cursor transcript provider", () => {
     expect(provider.watch).toBeUndefined();
   });
 
-  it("ignores malformed snapshot payloads during normalization", async () => {
+  it("returns empty agents when payload has no agents array", async () => {
     const provider = createCursorTranscriptProvider();
 
     const snapshot = await provider.normalize(
@@ -28,23 +28,7 @@ describe("cursor transcript provider", () => {
             provider: "cursor",
             inputUri: "cursor://transcripts",
             observedAt: Date.now(),
-            payload: {
-              agents: [
-                {
-                  id: "agent-1",
-                  name: "Agent One",
-                  kind: "local",
-                  isSubagent: false,
-                  status: "running",
-                  taskSummary: "Task",
-                  updatedAt: Date.now(),
-                  source: "cursor-transcripts",
-                },
-              ],
-              connected: true,
-              sourceLabel: "cursor-transcripts",
-              warnings: [123],
-            },
+            payload: { broken: true },
           },
         ],
         health: {
@@ -57,5 +41,44 @@ describe("cursor transcript provider", () => {
     );
 
     expect(snapshot.agents).toHaveLength(0);
+  });
+
+  it("extracts agents from valid payload regardless of other field shapes", async () => {
+    const provider = createCursorTranscriptProvider();
+    const now = Date.now();
+
+    const snapshot = await provider.normalize(
+      {
+        records: [
+          {
+            provider: "cursor",
+            inputUri: "cursor://transcripts",
+            observedAt: now,
+            payload: {
+              agents: [
+                {
+                  id: "agent-1",
+                  name: "Agent One",
+                  kind: "local",
+                  isSubagent: false,
+                  status: "running",
+                  taskSummary: "Task",
+                  updatedAt: now,
+                  source: "cursor-transcripts",
+                },
+              ],
+              connected: true,
+              sourceLabel: "cursor-transcripts",
+              warnings: [123],
+            },
+          },
+        ],
+        health: { connected: true, sourceLabel: "cursor-transcripts", warnings: [] },
+      },
+      now,
+    );
+
+    expect(snapshot.agents).toHaveLength(1);
+    expect(snapshot.agents[0].id).toBe("agent-1");
   });
 });
