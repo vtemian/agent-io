@@ -42,6 +42,64 @@ await observer.stop();
 
 `createObserver` defaults to the built-in Cursor provider. You can still pass a custom `provider` if needed.
 
+## How Runtime Works
+
+The watch runtime (used by `createObserver`) is designed around a small state machine and a single refresh worker.
+
+```mermaid
+stateDiagram-v2
+  [*] --> stopped
+  stopped --> starting: start()
+  starting --> started: connect + subscribe + started event
+  starting --> stopped: start aborted / failed
+  started --> started: watch event (debounced) / refreshNow()
+  started --> stopping: stop()
+  stopping --> stopped: disconnect + stopped event
+
+  state started {
+    [*] --> idle
+    idle --> refreshing: pendingRefresh
+    refreshing --> idle: snapshot + lifecycle events
+    refreshing --> idle: error event
+  }
+```
+
+### Lifecycle model
+
+- Internal states: `stopped -> starting -> started -> stopping`
+- `start()` connects to the source, installs optional watch subscriptions, emits `started`, and queues an initial refresh
+- `stop()` clears timers/subscriptions, rejects in-flight refresh waiters, disconnects, and emits `stopped`
+
+### Concurrency and race safety
+
+- A monotonic lifecycle token guards async operations
+- Every start/stop cycle advances the token
+- Late async completions (from older cycles) are ignored when token checks fail
+
+### Refresh flow
+
+- `refreshNow()` queues a waiter and triggers refresh scheduling
+- A single worker loop performs `readSnapshot()` cycles (no overlapping reads)
+- Each successful cycle emits:
+  - `snapshot` (current full snapshot)
+  - `lifecycle` (joined/statusChanged/heartbeat/left diffs)
+- Waiters for that cycle are resolved with the snapshot
+
+### Error and stop semantics
+
+- Snapshot/read failures emit `error` and reject cycle waiters
+- Calling `refreshNow()` while not running rejects with `NOT_RUNNING`
+- Stopping during an active refresh rejects pending waiters with `STOPPED_BEFORE_REFRESH_COMPLETED`
+
+### Watch subscriptions
+
+When a provider exposes `subscribeToChanges`, runtime subscriptions:
+
+- resolve configured/default watch paths
+- normalize paths (trim + drop empty + dedupe)
+- debounce bursty events before triggering refresh
+- resubscribe with exponential backoff on subscription failures
+
 ## Public Entry Points
 
 - Root package:

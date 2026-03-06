@@ -36,31 +36,6 @@ export const WATCH_RUNTIME_STATES = {
   stopped: "stopped",
 } as const;
 
-export const WATCH_RUNTIME_ERROR_MESSAGES = {
-  notRunning: "Watch runtime is not running.",
-  stoppedBeforeRefreshCompleted: "Watch runtime stopped before refresh completed.",
-} as const;
-
-export const WATCH_RUNTIME_ERROR_CODES = {
-  notRunning: "NOT_RUNNING",
-  stoppedBeforeRefreshCompleted: "STOPPED_BEFORE_REFRESH_COMPLETED",
-} as const;
-export type WatchRuntimeErrorCode =
-  (typeof WATCH_RUNTIME_ERROR_CODES)[keyof typeof WATCH_RUNTIME_ERROR_CODES];
-
-export class WatchRuntimeError extends Error {
-  code: WatchRuntimeErrorCode;
-
-  constructor(code: WatchRuntimeErrorCode, message: string) {
-    super(message);
-    this.name = "WatchRuntimeError";
-    this.code = code;
-  }
-}
-
-export function isWatchRuntimeError(error: unknown): error is WatchRuntimeError {
-  return error instanceof WatchRuntimeError;
-}
 
 export interface WatchLifecycleEvent<TStatus extends string = string> {
   kind: WatchLifecycleKind;
@@ -88,23 +63,35 @@ export interface WatchRuntimeOptions<TAgent, TStatus extends string = string> {
   ) => { close(): void };
 }
 
+export interface WatchRuntimeSnapshotEvent<TAgent> {
+  type: typeof WATCH_RUNTIME_EVENT_TYPES.snapshot;
+  at: number;
+  snapshot: WatchSnapshot<TAgent>;
+}
+
+export interface WatchRuntimeLifecycleEvent<TStatus extends string = string> {
+  type: typeof WATCH_RUNTIME_EVENT_TYPES.lifecycle;
+  at: number;
+  events: WatchLifecycleEvent<TStatus>[];
+}
+
+export interface WatchRuntimeStateEvent {
+  type: typeof WATCH_RUNTIME_EVENT_TYPES.state;
+  at: number;
+  state: (typeof WATCH_RUNTIME_STATES)[keyof typeof WATCH_RUNTIME_STATES];
+}
+
+export interface WatchRuntimeErrorEvent {
+  type: typeof WATCH_RUNTIME_EVENT_TYPES.error;
+  at: number;
+  error: Error;
+}
+
 export type WatchRuntimeEvent<TAgent, TStatus extends string = string> =
-  | {
-      type: typeof WATCH_RUNTIME_EVENT_TYPES.snapshot;
-      at: number;
-      snapshot: WatchSnapshot<TAgent>;
-    }
-  | {
-      type: typeof WATCH_RUNTIME_EVENT_TYPES.lifecycle;
-      at: number;
-      events: WatchLifecycleEvent<TStatus>[];
-    }
-  | {
-      type: typeof WATCH_RUNTIME_EVENT_TYPES.state;
-      at: number;
-      state: (typeof WATCH_RUNTIME_STATES)[keyof typeof WATCH_RUNTIME_STATES];
-    }
-  | { type: typeof WATCH_RUNTIME_EVENT_TYPES.error; at: number; error: Error };
+  | WatchRuntimeSnapshotEvent<TAgent>
+  | WatchRuntimeLifecycleEvent<TStatus>
+  | WatchRuntimeStateEvent
+  | WatchRuntimeErrorEvent;
 
 export interface WatchRuntime<TAgent, TStatus extends string = string> {
   start(): Promise<void>;

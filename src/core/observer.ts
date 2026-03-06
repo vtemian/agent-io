@@ -1,4 +1,4 @@
-import { createWatchRuntime } from "./runtime";
+import { createWatchRuntime } from "./runtime/index";
 import { WATCH_RUNTIME_EVENT_TYPES, WATCH_RUNTIME_STATES, type WatchSource } from "./types";
 import type { CanonicalAgentSnapshot, CanonicalAgentStatus } from "./model";
 import type {
@@ -82,12 +82,6 @@ export interface Observer {
   subscribeToSnapshots(listener: (event: ObserverSnapshotEvent) => void): () => void;
 }
 
-interface ResolvedDiscovery {
-  inputs: DiscoveryInput[];
-  watchPaths: string[];
-  warnings: string[];
-}
-
 export function createObserver(options: ObserverOptions): Observer {
   const now = options.now ?? (() => Date.now());
   const listeners = new Set<(event: ObserverEvent) => void>();
@@ -97,22 +91,22 @@ export function createObserver(options: ObserverOptions): Observer {
 
   let latestSnapshot: ObserverSnapshot | undefined;
   let previousSnapshot: ObserverSnapshot | undefined;
-  let discovery: ResolvedDiscovery | undefined;
+  let discovery: DiscoveryResult | undefined;
 
   const source: WatchSource<CanonicalAgentSnapshot> = {
     connect: async () => {
-      discovery = resolveDiscovery(await options.provider.discover(workspacePaths));
+      discovery = await options.provider.discover(workspacePaths);
       await options.provider.connect?.();
     },
     disconnect: () => options.provider.disconnect?.(),
     readSnapshot: async (at?: number) => {
       const observedAt = at ?? now();
-      const resolvedDiscovery =
-        discovery ?? resolveDiscovery(await options.provider.discover(workspacePaths));
-      discovery = resolvedDiscovery;
-      const readResult = await options.provider.read(resolvedDiscovery.inputs, observedAt);
+      const resolved =
+        discovery ?? (await options.provider.discover(workspacePaths));
+      discovery = resolved;
+      const readResult = await options.provider.read(resolved.inputs, observedAt);
       const normalized = await options.provider.normalize(readResult, observedAt);
-      return mergeSnapshotWarnings(normalized, readResult, resolvedDiscovery);
+      return mergeSnapshotWarnings(normalized, readResult, resolved);
     },
     getWatchPaths: () => discovery?.watchPaths ?? [],
   };
@@ -243,18 +237,10 @@ export function isObserverUpdatedEvent(event: ObserverEvent): event is ObserverU
   return event.type === OBSERVER_EVENT_TYPES.updated;
 }
 
-function resolveDiscovery(discovery: DiscoveryResult): ResolvedDiscovery {
-  return {
-    inputs: discovery.inputs,
-    watchPaths: discovery.watchPaths,
-    warnings: discovery.warnings,
-  };
-}
-
 function mergeSnapshotWarnings(
   normalized: CanonicalSnapshot,
   readResult: TranscriptReadResult,
-  discovery: ResolvedDiscovery,
+  discovery: DiscoveryResult,
 ): CanonicalSnapshot {
   const warnings = [
     ...discovery.warnings,
