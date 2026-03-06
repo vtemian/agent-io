@@ -2,4 +2,7 @@ node_modules/
 dist/
 coverage/
 *.log
+*.tsbuildinfo
 .DS_Store
+.env
+.env.local

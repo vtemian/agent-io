@@ -1,5 +1,9 @@
 # @agentprobe/core
 
+[![CI](https://github.com/vtemian/agentprobe/actions/workflows/ci.yml/badge.svg)](https://github.com/vtemian/agentprobe/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/@agentprobe/core)](https://www.npmjs.com/package/@agentprobe/core)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 `@agentprobe/core` is a TypeScript library for observing agent/session activity from transcript-like sources.
 
 It is designed in layers:
