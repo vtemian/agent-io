@@ -1,10 +1,22 @@
-# @agentprobe/core
+# AgentProbe: Real-Time Observability for Cursor, Claude Code, and AI Agents
 
 [![CI](https://github.com/vtemian/agentprobe/actions/workflows/ci.yml/badge.svg)](https://github.com/vtemian/agentprobe/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@agentprobe/core)](https://www.npmjs.com/package/@agentprobe/core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-`@agentprobe/core` is a TypeScript library for observing agent/session activity from transcript-like sources.
+**A TypeScript library that turns AI coding agent transcripts into normalized, real-time event streams.**
+
+Unlike traditional observability tools (AgentOps, LangSmith) that require active instrumentation of your LLM calls, AgentProbe uses **Passive Observability**. It parses the artifacts (transcripts, logs) that tools like Cursor and Claude Code already leave behind, giving you real-time visibility into proprietary agents you don't own.
+
+---
+
+### Why Passive Observability Matters
+
+**Read the full deep-dive on how AgentProbe reconstructs agent lifecycles from Cursor and Claude Code transcripts without instrumentation:**
+
+[AgentProbe: Real-Time Observability for AI Agents](https://blog.vtemian.com/project/agentprobe/)
+
+---
 
 It is designed in layers:
 
