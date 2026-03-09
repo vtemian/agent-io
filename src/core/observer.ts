@@ -1,6 +1,10 @@
 import { createWatchRuntime } from "./runtime/index";
-import { WATCH_RUNTIME_EVENT_TYPES, type WatchSource } from "./types";
-import type { CanonicalAgentSnapshot, CanonicalAgentStatus } from "./model";
+import { WATCH_LIFECYCLE_KIND, WATCH_RUNTIME_EVENT_TYPES, type WatchSource } from "./types";
+import {
+  CANONICAL_AGENT_STATUS,
+  type CanonicalAgentSnapshot,
+  type CanonicalAgentStatus,
+} from "./model";
 import type {
   CanonicalSnapshot,
   DiscoveryResult,
@@ -97,8 +101,18 @@ export function createObserver(options: ObserverOptions): Observer {
       const currentById = indexAgentsById(latestSnapshot.agents);
       const previousById = indexAgentsById(previousSnapshot?.agents ?? []);
       for (const change of event.events) {
+        if (change.kind === WATCH_LIFECYCLE_KIND.heartbeat) {
+          continue;
+        }
         const agent = currentById.get(change.agentId) ?? previousById.get(change.agentId);
         if (!agent) {
+          continue;
+        }
+        if (
+          change.kind === WATCH_LIFECYCLE_KIND.joined &&
+          (agent.status === CANONICAL_AGENT_STATUS.completed ||
+            agent.status === CANONICAL_AGENT_STATUS.error)
+        ) {
           continue;
         }
         emit({ change, agent, snapshot: latestSnapshot });

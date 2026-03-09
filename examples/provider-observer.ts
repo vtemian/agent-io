@@ -2,6 +2,7 @@ import type { CanonicalAgentSnapshot } from "../src/core/model";
 import { createObserver } from "../src/index";
 
 const DURATION_MS = 2 * 60 * 1000;
+const STATUS_ICON: Record<string, string> = { running: "▶", idle: "◦" };
 
 const activeAgents = new Map<string, CanonicalAgentSnapshot>();
 
@@ -19,26 +20,21 @@ async function main(): Promise<void> {
       activeAgents.set(agent.id, agent);
     }
 
-    const running = [...activeAgents.values()].filter((a) => a.status === "running");
-    const idle = [...activeAgents.values()].filter((a) => a.status === "idle");
-
-    if (running.length === 0 && idle.length === 0) {
+    if (activeAgents.size === 0) {
       console.log(`[${ts()}] ${event.snapshot.agents.length} agents, none active`);
       return;
     }
 
-    const parts = [
-      running.length > 0 ? `${running.length} running` : "",
-      idle.length > 0 ? `${idle.length} idle` : "",
-    ]
-      .filter(Boolean)
-      .join(", ");
-    console.log(`[${ts()}] ${parts} / ${event.snapshot.agents.length} total:`);
-    for (const a of running) {
-      console.log(`  ▶ ${a.id.slice(0, 8)} | ${a.taskSummary.slice(0, 80)}`);
+    const counts = new Map<string, number>();
+    for (const a of activeAgents.values()) {
+      counts.set(a.status, (counts.get(a.status) ?? 0) + 1);
     }
-    for (const a of idle) {
-      console.log(`  ◦ ${a.id.slice(0, 8)} | ${a.taskSummary.slice(0, 80)}`);
+    const summary = [...counts.entries()].map(([s, n]) => `${n} ${s}`).join(", ");
+    console.log(`[${ts()}] ${summary} / ${event.snapshot.agents.length} total:`);
+    for (const a of activeAgents.values()) {
+      console.log(
+        `  ${STATUS_ICON[a.status] ?? "?"} ${a.id.slice(0, 8)} | ${a.taskSummary.slice(0, 80)}`,
+      );
     }
   });
 
