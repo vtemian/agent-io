@@ -53,6 +53,7 @@ export interface WatchRuntimeOptions<TAgent, TStatus extends string = string> {
   source: WatchSource<TAgent>;
   lifecycle: LifecycleSnapshot<TAgent, TStatus>;
   debounceMs?: number;
+  checkIdleDelayMs?: number | false;
   now?: () => number;
   watchPaths?: string[];
   subscribeToChanges?: (

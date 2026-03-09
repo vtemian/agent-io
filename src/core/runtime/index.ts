@@ -1,8 +1,8 @@
 import { createLifecycleMapper } from "@/core/lifecycle";
 import { toError } from "@/core/errors";
 import {
+  DEFAULT_CHECK_IDLE_DELAY_MS,
   DEFAULT_DEBOUNCE_MS,
-  type RefreshWaiter,
   type RuntimeState,
   type RuntimeStatus,
   WATCH_RUNTIME_INTERNAL_STATES,
@@ -13,13 +13,19 @@ import {
   resolveWaiters,
 } from "./shared";
 import { createRuntimeSubscriptions } from "./subscriptions";
+import { createEventBus, RUNTIME_BUS_EVENT_TYPES } from "./event-bus";
 import type {
   WatchRuntime,
   WatchRuntimeEvent,
   WatchRuntimeOptions,
   WatchSnapshot,
 } from "@/core/types";
-import { WATCH_RUNTIME_EVENT_TYPES } from "@/core/types";
+import { WATCH_RUNTIME_EVENT_TYPES, WATCH_LIFECYCLE_KIND } from "@/core/types";
+
+type RuntimeBusEvent =
+  | { type: typeof RUNTIME_BUS_EVENT_TYPES.fileChanged }
+  | { type: typeof RUNTIME_BUS_EVENT_TYPES.checkIdle }
+  | { type: typeof RUNTIME_BUS_EVENT_TYPES.refreshRequested };
 
 export function createWatchRuntime<TAgent, TStatus extends string = string>(
   options: WatchRuntimeOptions<TAgent, TStatus>,
@@ -29,22 +35,25 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
   const lifecycle = createLifecycleMapper(options.lifecycle);
   const debounceMs = Math.max(0, options.debounceMs ?? DEFAULT_DEBOUNCE_MS);
   const subscribeToChanges = options.subscribeToChanges;
+  const checkIdleDelayMs =
+    options.checkIdleDelayMs === false
+      ? 0
+      : (options.checkIdleDelayMs ?? DEFAULT_CHECK_IDLE_DELAY_MS);
 
   const listeners = new Set<(event: WatchRuntimeEvent<TAgent, TStatus>) => void>();
+
+  let idleTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
 
   const runtimeState: RuntimeState<TAgent> = {
     state: WATCH_RUNTIME_INTERNAL_STATES.stopped,
     desiredRunning: false,
     lifecycleToken: 0,
-    pendingRefresh: false,
-    refreshLoop: null,
     queuedWaiters: [],
     activeCycleWaiters: [],
     startPromise: null,
     stopPromise: null,
   };
 
-  // Lifecycle guards and token helpers.
   function isState(value: RuntimeStatus): boolean {
     return runtimeState.state === value;
   }
@@ -98,6 +107,108 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
     });
   }
 
+  function clearIdleTimer(): void {
+    if (idleTimer !== null) {
+      globalThis.clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  }
+
+  function scheduleCheckIdle(): void {
+    if (checkIdleDelayMs <= 0 || !isStarted()) {
+      return;
+    }
+    clearIdleTimer();
+    idleTimer = globalThis.setTimeout(() => {
+      idleTimer = null;
+      bus.dispatch({ type: RUNTIME_BUS_EVENT_TYPES.checkIdle }, runtimeState.lifecycleToken);
+    }, checkIdleDelayMs);
+  }
+
+  async function readAndEmit(): Promise<{
+    snapshot: WatchSnapshot<TAgent>;
+    hasStatusChanges: boolean;
+  }> {
+    const at = now();
+    const snapshot = await source.readSnapshot(at);
+    if (!isStarted()) {
+      throw createStoppedError();
+    }
+    const lifecycleEvents = lifecycle.map(snapshot.agents, at);
+    const hasStatusChanges = lifecycleEvents.some(
+      (e) =>
+        e.kind === WATCH_LIFECYCLE_KIND.statusChanged ||
+        e.kind === WATCH_LIFECYCLE_KIND.joined ||
+        e.kind === WATCH_LIFECYCLE_KIND.left,
+    );
+    if (hasStatusChanges) {
+      emit({ type: WATCH_RUNTIME_EVENT_TYPES.snapshot, at, snapshot });
+      emit({ type: WATCH_RUNTIME_EVENT_TYPES.lifecycle, at, events: lifecycleEvents });
+    }
+    return { snapshot, hasStatusChanges };
+  }
+
+  const bus = createEventBus<RuntimeBusEvent>({
+    getToken: () => runtimeState.lifecycleToken,
+    handlers: {
+      [RUNTIME_BUS_EVENT_TYPES.fileChanged]: async () => {
+        if (!isStarted()) {
+          return;
+        }
+        try {
+          await readAndEmit();
+          scheduleCheckIdle();
+        } catch (error) {
+          if (!isStarted()) {
+            return;
+          }
+          emitRuntimeError(toError(error));
+        }
+      },
+
+      [RUNTIME_BUS_EVENT_TYPES.checkIdle]: async () => {
+        if (!isStarted()) {
+          return;
+        }
+        try {
+          const { snapshot } = await readAndEmit();
+          if (snapshot.agents.length > 0) {
+            scheduleCheckIdle();
+          }
+        } catch (error) {
+          if (!isStarted()) {
+            return;
+          }
+          emitRuntimeError(toError(error));
+        }
+      },
+
+      [RUNTIME_BUS_EVENT_TYPES.refreshRequested]: async () => {
+        const waiters = runtimeState.queuedWaiters;
+        runtimeState.queuedWaiters = [];
+        if (waiters.length === 0 || !isStarted()) {
+          rejectWaiters(waiters, createStoppedError());
+          return;
+        }
+        runtimeState.activeCycleWaiters = waiters;
+        try {
+          const { snapshot } = await readAndEmit();
+          resolveWaiters(waiters, snapshot);
+          scheduleCheckIdle();
+        } catch (error) {
+          if (!isStarted()) {
+            rejectWaiters(waiters, createStoppedError());
+            return;
+          }
+          emitRuntimeError(toError(error));
+          rejectWaiters(waiters, error);
+        } finally {
+          runtimeState.activeCycleWaiters = [];
+        }
+      },
+    },
+  });
+
   const {
     initializeSubscriptions,
     clearDebounceTimer,
@@ -108,13 +219,14 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
     getWatchPaths: source.getWatchPaths,
     subscribeToChanges,
     debounceMs,
-    queueRefresh,
+    onFileChanged: () => {
+      bus.dispatch({ type: RUNTIME_BUS_EVENT_TYPES.fileChanged }, runtimeState.lifecycleToken);
+    },
     isStartedWithToken,
     canSubscribeWithToken,
     emitError: emitRuntimeError,
   });
 
-  // Start/stop operations are split out to keep orchestration readable.
   async function runStartOperation(token: number): Promise<void> {
     try {
       await source.connect?.();
@@ -132,7 +244,7 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
       initializeSubscriptions(token);
       runtimeState.state = WATCH_RUNTIME_INTERNAL_STATES.started;
       emitStateEvent(WATCH_RUNTIME_INTERNAL_STATES.started);
-      queueRefresh();
+      bus.dispatch({ type: RUNTIME_BUS_EVENT_TYPES.fileChanged }, token);
     } catch (error) {
       if (isTokenCurrent(token)) {
         runtimeState.state = WATCH_RUNTIME_INTERNAL_STATES.stopped;
@@ -201,8 +313,10 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
     runtimeState.state = WATCH_RUNTIME_INTERNAL_STATES.stopping;
     const token = nextLifecycleToken();
     clearDebounceTimer();
+    clearIdleTimer();
     closeSubscriptions();
     clearResubscribeTimers();
+    bus.clear();
     lifecycle.reset();
 
     const stoppedError = createStoppedError();
@@ -227,7 +341,7 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
 
     return new Promise<WatchSnapshot<TAgent>>((resolve, reject) => {
       runtimeState.queuedWaiters.push({ resolve, reject });
-      queueRefresh();
+      bus.dispatch({ type: RUNTIME_BUS_EVENT_TYPES.refreshRequested }, runtimeState.lifecycleToken);
     });
   }
 
@@ -236,79 +350,6 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
     return () => {
       listeners.delete(listener);
     };
-  }
-
-  function queueRefresh(): void {
-    if (!isStarted()) {
-      return;
-    }
-
-    runtimeState.pendingRefresh = true;
-    ensureWorker();
-  }
-
-  function ensureWorker(): void {
-    if (runtimeState.refreshLoop) {
-      return;
-    }
-    runtimeState.refreshLoop = runWorker();
-  }
-
-  async function runWorker(): Promise<void> {
-    while (isStarted() && runtimeState.pendingRefresh) {
-      runtimeState.pendingRefresh = false;
-      const waitersForCycle = runtimeState.queuedWaiters;
-      runtimeState.queuedWaiters = [];
-      runtimeState.activeCycleWaiters = waitersForCycle;
-      try {
-        await runRefreshCycle(waitersForCycle);
-      } finally {
-        runtimeState.activeCycleWaiters = [];
-      }
-    }
-
-    runtimeState.refreshLoop = null;
-    if (isStarted() && runtimeState.pendingRefresh) {
-      ensureWorker();
-    }
-  }
-
-  async function runRefreshCycle(waitersForCycle: RefreshWaiter<TAgent>[]): Promise<void> {
-    try {
-      const at = now();
-      const snapshot = await source.readSnapshot(at);
-
-      if (!isStarted()) {
-        rejectWaiters(waitersForCycle, createStoppedError());
-        return;
-      }
-
-      emit({
-        type: WATCH_RUNTIME_EVENT_TYPES.snapshot,
-        at,
-        snapshot,
-      });
-
-      emit({
-        type: WATCH_RUNTIME_EVENT_TYPES.lifecycle,
-        at,
-        events: lifecycle.map(snapshot.agents, at),
-      });
-
-      resolveWaiters(waitersForCycle, snapshot);
-    } catch (error) {
-      if (!isStarted()) {
-        rejectWaiters(waitersForCycle, createStoppedError());
-        return;
-      }
-
-      emit({
-        type: WATCH_RUNTIME_EVENT_TYPES.error,
-        at: now(),
-        error: toError(error),
-      });
-      rejectWaiters(waitersForCycle, error);
-    }
   }
 
   function rejectAllQueuedWaiters(error: unknown): void {

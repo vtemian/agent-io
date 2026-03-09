@@ -42,11 +42,11 @@ await observer.start();
 await observer.stop();
 ```
 
-`createObserver` defaults to the built-in Cursor provider. You can still pass a custom `provider` if needed.
+`createObserver` defaults to the built-in Cursor provider. You can pass a custom `provider`, `debounceMs`, or `checkIdleDelayMs` as needed.
 
 ## How Runtime Works
 
-The watch runtime (used by `createObserver`) is designed around a small state machine and a single refresh worker.
+The watch runtime (used by `createObserver`) is built around a state machine and an internal typed event bus that processes events sequentially.
 
 ```mermaid
 stateDiagram-v2
@@ -58,33 +58,52 @@ stateDiagram-v2
   stopping --> stopped : disconnect
 
   state started {
-    [*] --> idle
-    idle --> refreshing : watch event / refreshNow()
-    refreshing --> idle : snapshot + lifecycle
-    refreshing --> idle : error
+    [*] --> waiting
+    waiting --> processing : file‑changed / check‑idle / refresh‑requested
+    processing --> waiting : snapshot + lifecycle emitted
+    processing --> waiting : error emitted
+
+    state waiting {
+      [*] --> watchingFS
+      watchingFS --> idleTimer : check‑idle scheduled
+      idleTimer --> watchingFS : timer fires
+    }
   }
 ```
 
+### Event bus
+
+Inside the `started` state, all work flows through a sequential event bus with three event types:
+
+- **`file-changed`** — dispatched after debounced fs.watch events; reads the snapshot and schedules a check-idle timer
+- **`check-idle`** — fires on a timer (default 5s); re-reads the snapshot to catch time-based status transitions (e.g. `running` → `idle` → `completed`) and self-reschedules while agents exist
+- **`refresh-requested`** — dispatched by `refreshNow()`; reads the snapshot and resolves waiting callers
+
+Events are processed one at a time (no overlapping reads). Each successful cycle emits:
+- `snapshot` (current full snapshot)
+- `lifecycle` (joined / statusChanged / heartbeat / left diffs)
+
+### Idle checking
+
+Agent statuses depend on time elapsed since last activity. Without periodic re-evaluation, time-based transitions are missed when transcript files stop changing. The check-idle mechanism solves this:
+
+1. After every `file-changed` or `refresh-requested`, a check-idle timer is scheduled
+2. When it fires, the runtime re-reads the snapshot with the current timestamp
+3. If agents still exist, the timer self-reschedules
+4. Configurable via `checkIdleDelayMs` (default `5000`, set to `false` to disable)
+
 ### Lifecycle model
 
-- Internal states: `stopped -> starting -> started -> stopping`
-- `start()` connects to the source, installs optional watch subscriptions, emits `started`, and queues an initial refresh
-- `stop()` clears timers/subscriptions, rejects in-flight refresh waiters, disconnects, and emits `stopped`
+- Internal states: `stopped → starting → started → stopping`
+- `start()` connects to the source, installs optional watch subscriptions, emits `started`, and dispatches an initial `file-changed` event
+- `stop()` clears timers/subscriptions/bus queue, rejects in-flight waiters, disconnects, and emits `stopped`
 
 ### Concurrency and race safety
 
-- A monotonic lifecycle token guards async operations
+- A monotonic lifecycle token guards all event dispatch
 - Every start/stop cycle advances the token
-- Late async completions (from older cycles) are ignored when token checks fail
-
-### Refresh flow
-
-- `refreshNow()` queues a waiter and triggers refresh scheduling
-- A single worker loop performs `readSnapshot()` cycles (no overlapping reads)
-- Each successful cycle emits:
-  - `snapshot` (current full snapshot)
-  - `lifecycle` (joined/statusChanged/heartbeat/left diffs)
-- Waiters for that cycle are resolved with the snapshot
+- Events dispatched with a stale token are silently dropped
+- The event bus processes handlers sequentially — no overlapping async work
 
 ### Error and stop semantics
 
@@ -98,7 +117,7 @@ When a provider exposes `subscribeToChanges`, runtime subscriptions:
 
 - resolve configured/default watch paths
 - normalize paths (trim + drop empty + dedupe)
-- debounce bursty events before triggering refresh
+- debounce bursty events before dispatching `file-changed` to the bus
 - resubscribe with exponential backoff on subscription failures
 
 ## Public Entry Points

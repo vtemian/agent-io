@@ -277,4 +277,130 @@ describe("createWatchRuntime", () => {
     const stateEvents = events.filter((e) => e.type === WATCH_RUNTIME_EVENT_TYPES.state);
     expect(stateEvents).toHaveLength(0);
   });
+
+  it("check-idle fires after initial readSnapshot", async () => {
+    vi.useFakeTimers();
+    let readCount = 0;
+    const runtime = createWatchRuntime<TestAgent, TestStatus>({
+      source: createTestSource({
+        readSnapshot: () => {
+          readCount += 1;
+          return {
+            agents: [{ id: "a", status: "running" }],
+            health: { connected: true, sourceLabel: "test", warnings: [] },
+          };
+        },
+      }),
+      lifecycle: { getId: (a) => a.id, getStatus: (a) => a.status },
+      checkIdleDelayMs: 100,
+    });
+
+    try {
+      await runtime.start();
+      expect(readCount).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(readCount).toBe(2);
+
+      await runtime.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("check-idle self-reschedules while agents exist", async () => {
+    vi.useFakeTimers();
+    let readCount = 0;
+    const runtime = createWatchRuntime<TestAgent, TestStatus>({
+      source: createTestSource({
+        readSnapshot: () => {
+          readCount += 1;
+          return {
+            agents: [{ id: "a", status: "running" }],
+            health: { connected: true, sourceLabel: "test", warnings: [] },
+          };
+        },
+      }),
+      lifecycle: { getId: (a) => a.id, getStatus: (a) => a.status },
+      checkIdleDelayMs: 100,
+    });
+
+    try {
+      await runtime.start();
+      expect(readCount).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(readCount).toBe(2);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(readCount).toBe(3);
+
+      await runtime.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("check-idle stops when snapshot has no agents", async () => {
+    vi.useFakeTimers();
+    let readCount = 0;
+    const runtime = createWatchRuntime<TestAgent, TestStatus>({
+      source: createTestSource({
+        readSnapshot: () => {
+          readCount += 1;
+          return {
+            agents: readCount === 1 ? [{ id: "a", status: "running" }] : [],
+            health: { connected: true, sourceLabel: "test", warnings: [] },
+          };
+        },
+      }),
+      lifecycle: { getId: (a) => a.id, getStatus: (a) => a.status },
+      checkIdleDelayMs: 100,
+    });
+
+    try {
+      await runtime.start();
+      expect(readCount).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(readCount).toBe(2);
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(readCount).toBe(2);
+
+      await runtime.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("checkIdleDelayMs: false disables idle checking", async () => {
+    vi.useFakeTimers();
+    let readCount = 0;
+    const runtime = createWatchRuntime<TestAgent, TestStatus>({
+      source: createTestSource({
+        readSnapshot: () => {
+          readCount += 1;
+          return {
+            agents: [{ id: "a", status: "running" }],
+            health: { connected: true, sourceLabel: "test", warnings: [] },
+          };
+        },
+      }),
+      lifecycle: { getId: (a) => a.id, getStatus: (a) => a.status },
+      checkIdleDelayMs: false,
+    });
+
+    try {
+      await runtime.start();
+      expect(readCount).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(readCount).toBe(1);
+
+      await runtime.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

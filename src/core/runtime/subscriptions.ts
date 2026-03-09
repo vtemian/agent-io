@@ -14,7 +14,7 @@ type RuntimeSubscriptionsOptions = {
   getWatchPaths?: () => string[];
   subscribeToChanges?: SubscribeToChanges;
   debounceMs: number;
-  queueRefresh: () => void;
+  onFileChanged: () => void;
   isStartedWithToken: (token: number) => boolean;
   canSubscribeWithToken: (token: number) => boolean;
   emitError: (error: Error) => void;
@@ -70,7 +70,7 @@ export function createRuntimeSubscriptions(options: RuntimeSubscriptionsOptions)
     }
     debounceTimer = globalThis.setTimeout(() => {
       debounceTimer = null;
-      options.queueRefresh();
+      options.onFileChanged();
     }, options.debounceMs);
   }
 

@@ -4,7 +4,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 function createTestOptions(overrides: Record<string, unknown> = {}) {
   return {
     debounceMs: 50,
-    queueRefresh: vi.fn(),
+    onFileChanged: vi.fn(),
     isStartedWithToken: vi.fn(() => true),
     canSubscribeWithToken: vi.fn(() => true),
     emitError: vi.fn(),
@@ -88,7 +88,7 @@ describe("createRuntimeSubscriptions", () => {
   });
 
   describe("debouncing", () => {
-    it("debounces rapid watch events into a single queueRefresh call", () => {
+    it("debounces rapid watch events into a single onFileChanged call", () => {
       const event = createCallbackHolder();
       const options = createTestOptions({
         watchPaths: ["/a"],
@@ -105,9 +105,9 @@ describe("createRuntimeSubscriptions", () => {
       event.fire();
       event.fire();
 
-      expect(options.queueRefresh).not.toHaveBeenCalled();
+      expect(options.onFileChanged).not.toHaveBeenCalled();
       vi.advanceTimersByTime(50);
-      expect(options.queueRefresh).toHaveBeenCalledOnce();
+      expect(options.onFileChanged).toHaveBeenCalledOnce();
     });
 
     it("clearDebounceTimer prevents pending refresh from firing", () => {
@@ -127,7 +127,7 @@ describe("createRuntimeSubscriptions", () => {
       subs.clearDebounceTimer();
       vi.advanceTimersByTime(100);
 
-      expect(options.queueRefresh).not.toHaveBeenCalled();
+      expect(options.onFileChanged).not.toHaveBeenCalled();
     });
 
     it("ignores events when token is no longer current", () => {
@@ -149,7 +149,7 @@ describe("createRuntimeSubscriptions", () => {
       event.fire();
       vi.advanceTimersByTime(100);
 
-      expect(options.queueRefresh).not.toHaveBeenCalled();
+      expect(options.onFileChanged).not.toHaveBeenCalled();
     });
   });
 

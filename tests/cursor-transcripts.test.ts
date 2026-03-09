@@ -144,7 +144,7 @@ describe("cursor transcripts", () => {
 
     const source = createCursorTranscriptSource({ sourcePaths: [transcriptPath] });
     source.connect();
-    const snapshot = await source.readSnapshot(Date.now() + 3_000);
+    const snapshot = await source.readSnapshot(Date.now() + 1_000);
 
     expect(snapshot.agents).toHaveLength(1);
     expect(snapshot.agents[0]?.status).toBe("running");

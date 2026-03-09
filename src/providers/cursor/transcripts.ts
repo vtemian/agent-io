@@ -73,7 +73,7 @@ interface TranscriptFileCache {
   fileUpdatedAt: number;
 }
 
-const RUNNING_WINDOW_MS = 15_000;
+const RUNNING_WINDOW_MS = 3_000;
 const IDLE_WINDOW_MS = 60_000;
 
 const conversationLineSchema = z.object({

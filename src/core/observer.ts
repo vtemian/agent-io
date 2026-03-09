@@ -68,6 +68,7 @@ export interface ObserverOptions {
   provider: TranscriptProvider;
   workspacePaths: string[];
   debounceMs?: number;
+  checkIdleDelayMs?: number | false;
   now?: () => number;
 }
 
@@ -117,6 +118,7 @@ export function createObserver(options: ObserverOptions): Observer {
       getStatus: (agent) => agent.status,
     },
     debounceMs: options.debounceMs ?? options.provider.watch?.debounceMs,
+    checkIdleDelayMs: options.checkIdleDelayMs,
     now,
     subscribeToChanges: providerWatch
       ? (watchPath, onEvent, onError) => providerWatch.subscribe(watchPath, onEvent, onError)

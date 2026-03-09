@@ -6,6 +6,7 @@ import {
 } from "@/core/errors";
 
 export const DEFAULT_DEBOUNCE_MS = 150;
+export const DEFAULT_CHECK_IDLE_DELAY_MS = 2_000;
 export const WATCH_RESUBSCRIBE_BASE_DELAY_MS = 500;
 export const WATCH_RESUBSCRIBE_MAX_DELAY_MS = 8_000;
 export const WATCH_RUNTIME_INTERNAL_STATES = {
@@ -27,8 +28,6 @@ export type RuntimeState<TAgent> = {
   state: RuntimeStatus;
   desiredRunning: boolean;
   lifecycleToken: number;
-  pendingRefresh: boolean;
-  refreshLoop: Promise<void> | null;
   queuedWaiters: RefreshWaiter<TAgent>[];
   activeCycleWaiters: RefreshWaiter<TAgent>[];
   startPromise: Promise<void> | null;

@@ -14,15 +14,25 @@ async function main(): Promise<void> {
     lastSnapshotAt = now;
 
     const running = event.snapshot.agents.filter((a) => a.status === "running");
+    const idle = event.snapshot.agents.filter((a) => a.status === "idle");
     const total = event.snapshot.agents.length;
 
-    if (running.length === 0) {
-      console.log(`[${ts()}] (${delta}) ${total} agents, none running`);
+    if (running.length === 0 && idle.length === 0) {
+      console.log(`[${ts()}] (${delta}) ${total} agents, none active`);
       return;
     }
-    console.log(`[${ts()}] (${delta}) ${running.length}/${total} running:`);
+    const parts = [
+      running.length > 0 ? `${running.length} running` : "",
+      idle.length > 0 ? `${idle.length} idle` : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    console.log(`[${ts()}] (${delta}) ${parts} / ${total} total:`);
     for (const agent of running) {
-      console.log(`  ${agent.id.slice(0, 8)} | ${agent.taskSummary.slice(0, 80)}`);
+      console.log(`  ▶ ${agent.id.slice(0, 8)} | ${agent.taskSummary.slice(0, 80)}`);
+    }
+    for (const agent of idle) {
+      console.log(`  ◦ ${agent.id.slice(0, 8)} | ${agent.taskSummary.slice(0, 80)}`);
     }
   });
 
