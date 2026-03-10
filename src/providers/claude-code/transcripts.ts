@@ -113,82 +113,21 @@ export function createClaudeCodeTranscriptSource(
       };
     }
 
-    const warnings: string[] = [];
     const orderedIds: string[] = [];
     const latestById = new Map<string, CanonicalAgentSnapshot>();
+    const allWarnings: string[] = [];
     let hasReadError = false;
     let successfulReads = 0;
 
     for (const sourcePath of sourcePaths) {
-      let fileUpdatedAt = now;
-      let fileSizeBytes = 0;
-      try {
-        const stats = await stat(sourcePath);
-        fileUpdatedAt = Math.round(stats.mtimeMs);
-        fileSizeBytes = stats.size;
-      } catch {
-        // Keep default now timestamp when stat access fails.
-      }
-
-      const cached = fileCache.get(sourcePath);
-
-      if (cached && cached.mtimeMs === fileUpdatedAt && cached.sizeBytes === fileSizeBytes) {
+      const result = await processSourceFile(sourcePath, now, fileCache);
+      allWarnings.push(...result.warnings);
+      if (result.success) {
         successfulReads += 1;
-        mergeAgents(
-          resolveAgentsFromState(cached.state, cached.fileUpdatedAt, now),
-          orderedIds,
-          latestById,
-        );
-        continue;
-      }
-
-      const contentChanged = !cached || fileSizeBytes !== cached.sizeBytes;
-      const effectiveUpdatedAt = contentChanged ? fileUpdatedAt : cached.fileUpdatedAt;
-
-      if (cached && !contentChanged) {
-        successfulReads += 1;
-        fileCache.set(sourcePath, { ...cached, mtimeMs: fileUpdatedAt });
-        mergeAgents(
-          resolveAgentsFromState(cached.state, effectiveUpdatedAt, now),
-          orderedIds,
-          latestById,
-        );
-        continue;
-      }
-
-      let contents: string;
-      try {
-        contents = await readFile(sourcePath, "utf8");
-        successfulReads += 1;
-      } catch {
-        hasReadError = true;
-        warnings.push(`Failed to read session path: ${sourcePath}`);
-        continue;
-      }
-
-      const lines = contents.split(/\r?\n/);
-      let state: SessionParseState;
-      let startLine: number;
-
-      if (cached && fileSizeBytes >= cached.sizeBytes && lines.length >= cached.lineCount) {
-        state = cloneParseState(cached.state);
-        startLine = cached.lineCount;
       } else {
-        state = createInitialParseState();
-        startLine = 0;
+        hasReadError = true;
       }
-
-      accumulateLines(state, lines, startLine, sourcePath, warnings);
-
-      fileCache.set(sourcePath, {
-        mtimeMs: fileUpdatedAt,
-        sizeBytes: fileSizeBytes,
-        lineCount: lines.length,
-        state: cloneParseState(state),
-        fileUpdatedAt: effectiveUpdatedAt,
-      });
-
-      mergeAgents(resolveAgentsFromState(state, effectiveUpdatedAt, now), orderedIds, latestById);
+      mergeAgents(result.agents, orderedIds, latestById);
     }
 
     pruneStaleCache(fileCache, sourcePaths);
@@ -201,7 +140,7 @@ export function createClaudeCodeTranscriptSource(
       agents,
       connected: successfulReads > 0 || !hasReadError,
       sourceLabel,
-      warnings,
+      warnings: allWarnings,
     };
   }
 
@@ -210,6 +149,110 @@ export function createClaudeCodeTranscriptSource(
     connect,
     disconnect,
     readSnapshot,
+  };
+}
+
+// --- Per-file processing ---
+
+interface FileStatResult {
+  fileUpdatedAt: number;
+  fileSizeBytes: number;
+}
+
+function statSourceFile(sourcePath: string, fallbackTimestamp: number): Promise<FileStatResult> {
+  return stat(sourcePath)
+    .then((stats) => ({
+      fileUpdatedAt: Math.round(stats.mtimeMs),
+      fileSizeBytes: stats.size,
+    }))
+    .catch(() => ({
+      fileUpdatedAt: fallbackTimestamp,
+      fileSizeBytes: 0,
+    }));
+}
+
+function readSourceFile(sourcePath: string): Promise<string | null> {
+  return readFile(sourcePath, "utf8").catch(() => null);
+}
+
+interface ParseStrategy {
+  state: SessionParseState;
+  startLine: number;
+}
+
+function resolveParseStrategy(
+  cached: SessionFileCache | undefined,
+  fileSizeBytes: number,
+  lineCount: number,
+): ParseStrategy {
+  if (cached && fileSizeBytes >= cached.sizeBytes && lineCount >= cached.lineCount) {
+    return { state: cloneParseState(cached.state), startLine: cached.lineCount };
+  }
+  return { state: createInitialParseState(), startLine: 0 };
+}
+
+interface ProcessFileResult {
+  agents: CanonicalAgentSnapshot[];
+  success: boolean;
+  warnings: string[];
+}
+
+async function processSourceFile(
+  sourcePath: string,
+  now: number,
+  fileCache: Map<string, SessionFileCache>,
+): Promise<ProcessFileResult> {
+  const warnings: string[] = [];
+  const { fileUpdatedAt, fileSizeBytes } = await statSourceFile(sourcePath, now);
+
+  const cached = fileCache.get(sourcePath);
+
+  // Cache hit: mtime and size unchanged
+  if (cached && cached.mtimeMs === fileUpdatedAt && cached.sizeBytes === fileSizeBytes) {
+    return {
+      agents: resolveAgentsFromState(cached.state, cached.fileUpdatedAt, now),
+      success: true,
+      warnings,
+    };
+  }
+
+  const contentChanged = !cached || fileSizeBytes !== cached.sizeBytes;
+  const effectiveUpdatedAt = contentChanged ? fileUpdatedAt : cached.fileUpdatedAt;
+
+  // Mtime changed but size identical: update mtime, reuse state
+  if (cached && !contentChanged) {
+    fileCache.set(sourcePath, { ...cached, mtimeMs: fileUpdatedAt });
+    return {
+      agents: resolveAgentsFromState(cached.state, effectiveUpdatedAt, now),
+      success: true,
+      warnings,
+    };
+  }
+
+  // Content changed: read and parse
+  const contents = await readSourceFile(sourcePath);
+  if (contents === null) {
+    warnings.push(`Failed to read session path: ${sourcePath}`);
+    return { agents: [], success: false, warnings };
+  }
+
+  const lines = contents.split(/\r?\n/);
+  const { state, startLine } = resolveParseStrategy(cached, fileSizeBytes, lines.length);
+
+  accumulateLines(state, lines, startLine, sourcePath, warnings);
+
+  fileCache.set(sourcePath, {
+    mtimeMs: fileUpdatedAt,
+    sizeBytes: fileSizeBytes,
+    lineCount: lines.length,
+    state: cloneParseState(state),
+    fileUpdatedAt: effectiveUpdatedAt,
+  });
+
+  return {
+    agents: resolveAgentsFromState(state, effectiveUpdatedAt, now),
+    success: true,
+    warnings,
   };
 }
 
