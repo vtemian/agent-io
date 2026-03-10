@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  parseSessionRecord,
-  type ClaudeCodeSessionRecord,
-} from "@/providers/claude-code/schemas";
+import { parseSessionRecord } from "@/providers/claude-code/schemas";
 
 describe("claude-code schemas", () => {
   it("parses a user record with string content", () => {
@@ -25,7 +22,7 @@ describe("claude-code schemas", () => {
 
     const result = parseSessionRecord(raw);
     expect(result).not.toBeNull();
-    expect(result!.type).toBe("user");
+    expect(result?.type).toBe("user");
   });
 
   it("parses a user record with array content", () => {
@@ -48,7 +45,7 @@ describe("claude-code schemas", () => {
 
     const result = parseSessionRecord(raw);
     expect(result).not.toBeNull();
-    expect(result!.type).toBe("user");
+    expect(result?.type).toBe("user");
   });
 
   it("parses an assistant record with tool_use content", () => {
@@ -77,7 +74,7 @@ describe("claude-code schemas", () => {
 
     const result = parseSessionRecord(raw);
     expect(result).not.toBeNull();
-    expect(result!.type).toBe("assistant");
+    expect(result?.type).toBe("assistant");
   });
 
   it("parses a progress record with agent_progress data", () => {
@@ -104,7 +101,7 @@ describe("claude-code schemas", () => {
 
     const result = parseSessionRecord(raw);
     expect(result).not.toBeNull();
-    expect(result!.type).toBe("progress");
+    expect(result?.type).toBe("progress");
   });
 
   it("parses a system record", () => {
@@ -125,7 +122,7 @@ describe("claude-code schemas", () => {
 
     const result = parseSessionRecord(raw);
     expect(result).not.toBeNull();
-    expect(result!.type).toBe("system");
+    expect(result?.type).toBe("system");
   });
 
   it("returns null for file-history-snapshot records", () => {
@@ -133,7 +130,11 @@ describe("claude-code schemas", () => {
       type: "file-history-snapshot",
       messageId: "uuid-001",
       isSnapshotUpdate: false,
-      snapshot: { messageId: "uuid-001", timestamp: "2026-03-10T07:35:50.757Z", trackedFileBackups: {} },
+      snapshot: {
+        messageId: "uuid-001",
+        timestamp: "2026-03-10T07:35:50.757Z",
+        trackedFileBackups: {},
+      },
     };
 
     const result = parseSessionRecord(raw);

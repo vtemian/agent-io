@@ -21,8 +21,18 @@ describe("multi-provider createObserver", () => {
     );
 
     // Set up Cursor transcript
-    const cursorWorkspaceId = path.resolve(workspacePath).replace(/^\/+/, "").split(/[\\/]/).join("-");
-    const cursorDir = path.join(homedir(), ".cursor", "projects", cursorWorkspaceId, "agent-transcripts");
+    const cursorWorkspaceId = path
+      .resolve(workspacePath)
+      .replace(/^\/+/, "")
+      .split(/[\\/]/)
+      .join("-");
+    const cursorDir = path.join(
+      homedir(),
+      ".cursor",
+      "projects",
+      cursorWorkspaceId,
+      "agent-transcripts",
+    );
     mkdirSync(cursorDir, { recursive: true });
     cleanupPaths.push(cursorDir);
     writeFileSync(

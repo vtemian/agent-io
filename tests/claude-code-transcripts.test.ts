@@ -73,11 +73,11 @@ describe("claude-code transcripts", () => {
     expect(snapshot.agents.length).toBeGreaterThanOrEqual(1);
     const parent = snapshot.agents.find((a) => !a.isSubagent);
     expect(parent).toBeDefined();
-    expect(parent!.id).toBe("sess-001");
-    expect(parent!.taskSummary).toBe("fix the bug");
-    expect(parent!.status).toBe("running");
-    expect(parent!.source).toBe("claude-code-sessions");
-    expect(parent!.metadata).toEqual(
+    expect(parent?.id).toBe("sess-001");
+    expect(parent?.taskSummary).toBe("fix the bug");
+    expect(parent?.status).toBe("running");
+    expect(parent?.source).toBe("claude-code-sessions");
+    expect(parent?.metadata).toEqual(
       expect.objectContaining({
         model: "claude-opus-4-6",
         gitBranch: "main",
@@ -119,7 +119,7 @@ describe("claude-code transcripts", () => {
     const snapshot = await source.readSnapshot(new Date("2026-03-10T07:00:11.000Z").getTime());
 
     const agent = snapshot.agents.find((a) => !a.isSubagent);
-    expect(agent!.status).toBe("idle");
+    expect(agent?.status).toBe("idle");
   });
 
   it("marks agent completed after IDLE_WINDOW_MS", async () => {
@@ -155,7 +155,7 @@ describe("claude-code transcripts", () => {
     const snapshot = await source.readSnapshot(new Date("2026-03-10T07:02:01.000Z").getTime());
 
     const agent = snapshot.agents.find((a) => !a.isSubagent);
-    expect(agent!.status).toBe("completed");
+    expect(agent?.status).toBe("completed");
   });
 
   it("extracts subagents from agent_progress events", async () => {
@@ -223,12 +223,12 @@ describe("claude-code transcripts", () => {
 
     const subagent = snapshot.agents.find((a) => a.isSubagent);
     expect(subagent).toBeDefined();
-    expect(subagent!.id).toBe("sess-sub:sub-agent-001");
-    expect(subagent!.name).toBe("Subagent sub-ag");
-    expect(subagent!.isSubagent).toBe(true);
-    expect(subagent!.taskSummary).toBe("Explore the codebase thoroughly");
-    expect(subagent!.status).toBe("running");
-    expect(subagent!.metadata).toEqual(
+    expect(subagent?.id).toBe("sess-sub:sub-agent-001");
+    expect(subagent?.name).toBe("Subagent sub-ag");
+    expect(subagent?.isSubagent).toBe(true);
+    expect(subagent?.taskSummary).toBe("Explore the codebase thoroughly");
+    expect(subagent?.status).toBe("running");
+    expect(subagent?.metadata).toEqual(
       expect.objectContaining({
         parentSessionId: "sess-sub",
         progressCount: 2,
@@ -318,7 +318,7 @@ describe("claude-code transcripts", () => {
     const snapshot = await source.readSnapshot(new Date("2026-03-10T07:00:02.000Z").getTime());
 
     const agent = snapshot.agents.find((a) => !a.isSubagent);
-    expect(agent!.metadata).toEqual(
+    expect(agent?.metadata).toEqual(
       expect.objectContaining({
         model: "claude-sonnet-4-6",
         gitBranch: "main",
@@ -338,7 +338,11 @@ describe("claude-code transcripts", () => {
         type: "file-history-snapshot",
         messageId: "u1",
         isSnapshotUpdate: false,
-        snapshot: { messageId: "u1", timestamp: "2026-03-10T07:00:00.000Z", trackedFileBackups: {} },
+        snapshot: {
+          messageId: "u1",
+          timestamp: "2026-03-10T07:00:00.000Z",
+          trackedFileBackups: {},
+        },
       },
       {
         ...baseFields,

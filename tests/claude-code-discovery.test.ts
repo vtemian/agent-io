@@ -146,10 +146,12 @@ describe("claude-code discovery", () => {
     });
 
     expect(names).toHaveLength(2);
-    expect(names).toEqual(expect.arrayContaining([
-      expect.stringContaining("a.jsonl"),
-      expect.stringContaining("b.jsonl"),
-    ]));
+    expect(names).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("a.jsonl"),
+        expect.stringContaining("b.jsonl"),
+      ]),
+    );
   });
 
   it("deduplicates workspace paths", () => {

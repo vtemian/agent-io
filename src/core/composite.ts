@@ -7,9 +7,7 @@ import type {
 } from "./providers";
 import type { CanonicalAgentSnapshot } from "./model";
 
-export function createCompositeProvider(
-  providers: TranscriptProvider[],
-): TranscriptProvider {
+export function createCompositeProvider(providers: TranscriptProvider[]): TranscriptProvider {
   const providerById = new Map<string, TranscriptProvider>();
   for (const provider of providers) {
     providerById.set(provider.id, provider);
@@ -68,7 +66,7 @@ export function createCompositeProvider(
     const allRecords: TranscriptReadResult["records"] = [];
     const allWarnings: string[] = [];
     let anyConnected = false;
-    let sourceLabels: string[] = [];
+    const sourceLabels: string[] = [];
 
     for (const provider of providers) {
       const providerInputs = inputsByProvider.get(provider.id) ?? [];
@@ -142,34 +140,38 @@ export function createCompositeProvider(
 
   // Build composite watch from all providers that have watch
   const watchProviders = providers.filter((p) => p.watch);
-  const compositeWatch = watchProviders.length > 0
-    ? {
-        debounceMs: Math.min(...watchProviders.map((p) => p.watch!.debounceMs ?? 150)),
-        subscribe(
-          watchPath: string,
-          onEvent: () => void,
-          onError: (error: Error) => void,
-        ): { close(): void } {
-          // Subscribe to the first provider whose watch can handle this path
-          // All providers get the same watch paths, so delegate to each
-          const subs: { close(): void }[] = [];
-          for (const provider of watchProviders) {
-            try {
-              subs.push(provider.watch!.subscribe(watchPath, onEvent, onError));
-            } catch {
-              // Provider might not handle this path
-            }
-          }
-          return {
-            close() {
-              for (const sub of subs) {
-                sub.close();
+  const compositeWatch =
+    watchProviders.length > 0
+      ? {
+          debounceMs: Math.min(...watchProviders.map((p) => p.watch?.debounceMs ?? 150)),
+          subscribe(
+            watchPath: string,
+            onEvent: () => void,
+            onError: (error: Error) => void,
+          ): { close(): void } {
+            // Subscribe to the first provider whose watch can handle this path
+            // All providers get the same watch paths, so delegate to each
+            const subs: { close(): void }[] = [];
+            for (const provider of watchProviders) {
+              try {
+                const sub = provider.watch?.subscribe(watchPath, onEvent, onError);
+                if (sub) {
+                  subs.push(sub);
+                }
+              } catch {
+                // Provider might not handle this path
               }
-            },
-          };
-        },
-      }
-    : undefined;
+            }
+            return {
+              close() {
+                for (const sub of subs) {
+                  sub.close();
+                }
+              },
+            };
+          },
+        }
+      : undefined;
 
   return {
     id: providers.map((p) => p.id).join("+"),

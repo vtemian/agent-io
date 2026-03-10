@@ -98,9 +98,7 @@ export interface CreateObserverOptions extends Omit<ObserverOptions, "provider">
 
 export function createObserver(options: CreateObserverOptions): Observer {
   const providers = options.providers ?? [cursor(), claudeCode()];
-  const provider = providers.length === 1
-    ? providers[0]
-    : createCompositeProvider(providers);
+  const provider = providers.length === 1 ? providers[0] : createCompositeProvider(providers);
 
   return createCoreObserver({
     ...options,

@@ -14,7 +14,10 @@ describe("claude-code provider", () => {
     cleanupPaths.length = 0;
   });
 
-  function setupClaudeHome(label: string, workspacePath: string): {
+  function setupClaudeHome(
+    label: string,
+    workspacePath: string,
+  ): {
     claudeHome: string;
     projectDir: string;
   } {
@@ -78,7 +81,7 @@ describe("claude-code provider", () => {
     );
 
     const provider = claudeCode({ claudeHomePath: claudeHome });
-    provider.connect!();
+    provider.connect?.();
 
     const discovery = provider.discover([workspacePath]);
     expect(discovery).toEqual(
@@ -91,7 +94,7 @@ describe("claude-code provider", () => {
     );
 
     const readResult = await provider.read(
-      (discovery as any).inputs,
+      (discovery as { inputs: import("@/core/providers").DiscoveryInput[] }).inputs,
       Date.now(),
     );
     expect(readResult.health.connected).toBe(true);
@@ -111,10 +114,13 @@ describe("claude-code provider", () => {
     cleanupPaths.push(claudeHome);
 
     const provider = claudeCode({ claudeHomePath: claudeHome });
-    provider.connect!();
+    provider.connect?.();
 
     const discovery = provider.discover(["/nonexistent/workspace"]);
-    const readResult = await provider.read((discovery as any).inputs, Date.now());
+    const readResult = await provider.read(
+      (discovery as { inputs: import("@/core/providers").DiscoveryInput[] }).inputs,
+      Date.now(),
+    );
     const normalized = await provider.normalize(readResult, Date.now());
 
     expect(normalized.agents).toHaveLength(0);

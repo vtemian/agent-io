@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createCompositeProvider } from "@/core/composite";
-import { PROVIDER_KINDS, type TranscriptProvider } from "@/core/providers";
+import type { CanonicalAgentSnapshot } from "@/core/model";
+import type { TranscriptProvider } from "@/core/providers";
 
 describe("composite provider", () => {
-  function mockProvider(
-    id: string,
-    agents: { id: string; status: string }[],
-  ): TranscriptProvider {
+  function mockProvider(id: string, agents: { id: string; status: string }[]): TranscriptProvider {
     return {
       id,
       discover: () => ({
@@ -40,7 +38,9 @@ describe("composite provider", () => {
         health: { connected: true, sourceLabel: id, warnings: [] },
       }),
       normalize: (readResult) => {
-        const payload = readResult.records[0]?.payload as any;
+        const payload = readResult.records[0]?.payload as
+          | { agents: CanonicalAgentSnapshot[]; connected: boolean }
+          | undefined;
         return {
           agents: payload?.agents ?? [],
           health: readResult.health,
@@ -50,12 +50,8 @@ describe("composite provider", () => {
   }
 
   it("merges agents from multiple providers", async () => {
-    const cursorProvider = mockProvider("cursor", [
-      { id: "cursor-agent-1", status: "running" },
-    ]);
-    const claudeProvider = mockProvider("claude-code", [
-      { id: "claude-agent-1", status: "idle" },
-    ]);
+    const cursorProvider = mockProvider("cursor", [{ id: "cursor-agent-1", status: "running" }]);
+    const claudeProvider = mockProvider("claude-code", [{ id: "claude-agent-1", status: "idle" }]);
 
     const composite = createCompositeProvider([cursorProvider, claudeProvider]);
     const discovery = await composite.discover(["/workspace"]);
@@ -68,9 +64,7 @@ describe("composite provider", () => {
 
     const normalized = await composite.normalize(readResult, Date.now());
     expect(normalized.agents).toHaveLength(2);
-    expect(normalized.agents.map((a) => a.id).sort()).toEqual(
-      ["claude-agent-1", "cursor-agent-1"],
-    );
+    expect(normalized.agents.map((a) => a.id).sort()).toEqual(["claude-agent-1", "cursor-agent-1"]);
   });
 
   it("routes inputs to correct provider during read", async () => {
@@ -79,7 +73,7 @@ describe("composite provider", () => {
 
     const cursorProvider: TranscriptProvider = {
       ...mockProvider("cursor", []),
-      read: (inputs, now) => {
+      read: (inputs, _now) => {
         cursorReadCalled = true;
         expect(inputs.every((i) => i.metadata?.providerId === "cursor")).toBe(true);
         return {
@@ -91,7 +85,7 @@ describe("composite provider", () => {
 
     const claudeProvider: TranscriptProvider = {
       ...mockProvider("claude-code", []),
-      read: (inputs, now) => {
+      read: (inputs, _now) => {
         claudeReadCalled = true;
         expect(inputs.every((i) => i.metadata?.providerId === "claude-code")).toBe(true);
         return {
@@ -115,21 +109,29 @@ describe("composite provider", () => {
 
     const cursorProvider: TranscriptProvider = {
       ...mockProvider("cursor", []),
-      connect: () => { cursorConnected = true; },
-      disconnect: () => { cursorConnected = false; },
+      connect: () => {
+        cursorConnected = true;
+      },
+      disconnect: () => {
+        cursorConnected = false;
+      },
     };
     const claudeProvider: TranscriptProvider = {
       ...mockProvider("claude-code", []),
-      connect: () => { claudeConnected = true; },
-      disconnect: () => { claudeConnected = false; },
+      connect: () => {
+        claudeConnected = true;
+      },
+      disconnect: () => {
+        claudeConnected = false;
+      },
     };
 
     const composite = createCompositeProvider([cursorProvider, claudeProvider]);
-    await composite.connect!();
+    await composite.connect?.();
     expect(cursorConnected).toBe(true);
     expect(claudeConnected).toBe(true);
 
-    await composite.disconnect!();
+    await composite.disconnect?.();
     expect(cursorConnected).toBe(false);
     expect(claudeConnected).toBe(false);
   });
@@ -139,7 +141,7 @@ describe("composite provider", () => {
       ...mockProvider("cursor", []),
       watch: {
         debounceMs: 100,
-        subscribe: (path, onEvent) => {
+        subscribe: (_path, _onEvent) => {
           return { close: () => {} };
         },
       },
@@ -148,7 +150,7 @@ describe("composite provider", () => {
       ...mockProvider("claude-code", []),
       watch: {
         debounceMs: 200,
-        subscribe: (path, onEvent) => {
+        subscribe: (_path, _onEvent) => {
           return { close: () => {} };
         },
       },
@@ -156,7 +158,7 @@ describe("composite provider", () => {
 
     const composite = createCompositeProvider([cursorProvider, claudeProvider]);
     expect(composite.watch).toBeDefined();
-    expect(composite.watch!.debounceMs).toBe(100); // uses minimum
+    expect(composite.watch?.debounceMs).toBe(100); // uses minimum
   });
 
   it("health is connected when any provider is connected", async () => {

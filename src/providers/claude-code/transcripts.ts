@@ -186,11 +186,7 @@ export function createClaudeCodeTranscriptSource(
         fileUpdatedAt: effectiveUpdatedAt,
       });
 
-      mergeAgents(
-        resolveAgentsFromState(state, effectiveUpdatedAt, now),
-        orderedIds,
-        latestById,
-      );
+      mergeAgents(resolveAgentsFromState(state, effectiveUpdatedAt, now), orderedIds, latestById);
     }
 
     pruneStaleEntries(fileCache, sourcePaths);
@@ -303,7 +299,7 @@ function accumulateRecord(state: SessionParseState, record: ClaudeCodeSessionRec
     } else {
       const textParts = content
         .filter((entry) => entry.type === "text" && typeof entry.text === "string")
-        .map((entry) => entry.text!)
+        .map((entry) => entry.text ?? "")
         .join(" ");
       if (textParts.length > 0) {
         state.latestUserContent = textParts;
@@ -324,7 +320,9 @@ function accumulateRecord(state: SessionParseState, record: ClaudeCodeSessionRec
     const hasToolUse = record.message.content.some((entry) => entry.type === "tool_use");
     state.lastAssistantHadToolUse = hasToolUse;
     if (hasToolUse) {
-      state.toolCallCount += record.message.content.filter((entry) => entry.type === "tool_use").length;
+      state.toolCallCount += record.message.content.filter(
+        (entry) => entry.type === "tool_use",
+      ).length;
     }
     return;
   }

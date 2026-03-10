@@ -25,9 +25,7 @@ export interface CursorOptions {
   watch?: CursorWatchOptions | false;
 }
 
-export function cursor(
-  options: CursorOptions = {},
-): TranscriptProvider {
+export function cursor(options: CursorOptions = {}): TranscriptProvider {
   const sourceLabel = options.sourceLabel ?? CURSOR_SOURCE_KIND;
   const watch = options.watch === false ? undefined : createCursorWatch(options.watch);
   let source: CursorTranscriptSource | undefined;

@@ -55,9 +55,11 @@ export type AssistantRecord = z.infer<typeof assistantRecordSchema>;
 
 // --- Progress record ---
 
-const progressDataSchema = z.object({
-  type: z.string(),
-}).passthrough();
+const progressDataSchema = z
+  .object({
+    type: z.string(),
+  })
+  .passthrough();
 
 const progressRecordSchema = structuredRecordBaseSchema.extend({
   type: z.literal("progress"),
