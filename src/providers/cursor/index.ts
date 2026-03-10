@@ -1,4 +1,5 @@
 export {
+  listTranscriptFileNames,
   resolveTranscriptDirectories,
   resolveTranscriptSourcePaths,
   type TranscriptDiscoveryOptions,
@@ -11,7 +12,7 @@ export {
   createCursorTranscriptSource,
   type CursorTranscriptSource,
   type CursorTranscriptSourceOptions,
-  type TranscriptSourceResult,
+  type CursorTranscriptSourceResult,
 } from "./transcripts";
 export {
   createCursorWatch,

@@ -6,7 +6,17 @@ import type {
   TranscriptReadResult,
 } from "./providers";
 import type { CanonicalAgentSnapshot } from "./model";
-import { groupByKey } from "@/providers/shared/providers";
+
+function groupByKey<T>(items: readonly T[], keyFn: (item: T) => string): Map<string, T[]> {
+  const map = new Map<string, T[]>();
+  for (const item of items) {
+    const key = keyFn(item);
+    const group = map.get(key) ?? [];
+    group.push(item);
+    map.set(key, group);
+  }
+  return map;
+}
 
 export function createCompositeProvider(providers: TranscriptProvider[]): TranscriptProvider {
   async function discover(workspacePaths: string[]): Promise<DiscoveryResult> {
@@ -40,8 +50,16 @@ export function createCompositeProvider(providers: TranscriptProvider[]): Transc
   }
 
   async function disconnect(): Promise<void> {
+    let firstError: unknown;
     for (const provider of providers) {
-      await provider.disconnect?.();
+      try {
+        await provider.disconnect?.();
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+    if (firstError) {
+      throw firstError;
     }
   }
 
@@ -137,7 +155,11 @@ export function createCompositeProvider(providers: TranscriptProvider[]): Transc
             return {
               close() {
                 for (const sub of subs) {
-                  sub.close();
+                  try {
+                    sub.close();
+                  } catch {
+                    // best-effort cleanup
+                  }
                 }
               },
             };
@@ -167,7 +189,11 @@ function subscribeAll(
       const sub = provider.watch?.subscribe(watchPath, onEvent, onError);
       return sub ? [sub] : [];
     } catch (error) {
-      onError(error instanceof Error ? error : new Error(String(error)));
+      try {
+        onError(error instanceof Error ? error : new Error(String(error)));
+      } catch {
+        // onError must not break remaining subscriptions
+      }
       return [];
     }
   });

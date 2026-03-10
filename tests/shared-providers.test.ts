@@ -4,7 +4,6 @@ import {
   mergeAgents,
   pruneStaleCache,
   isAgentPayload,
-  groupByKey,
 } from "@/providers/shared/providers";
 import type { CanonicalAgentSnapshot } from "@/core/model";
 
@@ -56,24 +55,5 @@ describe("shared provider utils", () => {
     expect(isAgentPayload({ agents: "not array" })).toBe(false);
     expect(isAgentPayload(null)).toBe(false);
     expect(isAgentPayload("string")).toBe(false);
-  });
-
-  it("groupByKey groups items by key function", () => {
-    const items = [
-      { name: "a", group: "x" },
-      { name: "b", group: "y" },
-      { name: "c", group: "x" },
-    ];
-    const result = groupByKey(items, (i) => i.group);
-    expect(result.get("x")).toEqual([
-      { name: "a", group: "x" },
-      { name: "c", group: "x" },
-    ]);
-    expect(result.get("y")).toEqual([{ name: "b", group: "y" }]);
-  });
-
-  it("groupByKey returns empty map for empty input", () => {
-    const result = groupByKey([], () => "key");
-    expect(result.size).toBe(0);
   });
 });

@@ -16,7 +16,7 @@ export interface SessionDiscoveryOptions {
 }
 
 export function encodeWorkspacePath(workspacePath: string): string {
-  return workspacePath.replace(/\//g, "-");
+  return workspacePath.split(/[\\/]/).join("-");
 }
 
 export function resolveSessionDirectories(options: SessionDiscoveryOptions): string[] {

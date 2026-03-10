@@ -45,17 +45,6 @@ export function pruneStaleCache(
   }
 }
 
-export function groupByKey<T>(items: readonly T[], keyFn: (item: T) => string): Map<string, T[]> {
-  const map = new Map<string, T[]>();
-  for (const item of items) {
-    const key = keyFn(item);
-    const group = map.get(key) ?? [];
-    group.push(item);
-    map.set(key, group);
-  }
-  return map;
-}
-
 export function isAgentPayload(value: unknown): value is { agents: CanonicalAgentSnapshot[] } {
   return (
     typeof value === "object" && value !== null && "agents" in value && Array.isArray(value.agents)

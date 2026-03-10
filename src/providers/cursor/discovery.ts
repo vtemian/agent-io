@@ -7,12 +7,11 @@ import {
   collectJsonlFiles,
   type DiscoveredFile,
 } from "@/providers/shared/discovery";
+import { MAX_DISCOVERED_TRANSCRIPT_FILES } from "./constants";
 
 export interface TranscriptDiscoveryOptions {
   workspacePaths: string[];
 }
-
-const MAX_DISCOVERED_TRANSCRIPT_FILES = 400;
 
 export function resolveTranscriptSourcePaths(options: TranscriptDiscoveryOptions): string[] {
   const workspaceTranscriptDirectories = resolveTranscriptDirectories(options);

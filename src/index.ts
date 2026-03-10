@@ -8,7 +8,6 @@ import { createCompositeProvider } from "./core/composite";
 import { claudeCode } from "./providers/claude-code";
 import { cursor } from "./providers/cursor";
 
-// --- Core: observer, composite, lifecycle, watch runtime ---
 export {
   createLifecycleMapper,
   createWatchRuntime,
@@ -19,14 +18,12 @@ export {
   type ObserverSnapshot,
 } from "./core";
 
-// --- Errors ---
 export {
   isWatchRuntimeError,
   WatchRuntimeError,
   type WatchRuntimeErrorCode,
 } from "./core/errors";
 
-// --- Model types ---
 export {
   CANONICAL_AGENT_STATUS,
   CANONICAL_AGENT_KIND,
@@ -35,7 +32,6 @@ export {
   type CanonicalAgentSnapshot,
 } from "./core/model";
 
-// --- Provider contract types ---
 export {
   PROVIDER_KINDS,
   type ProviderKind,
@@ -47,7 +43,6 @@ export {
   type TranscriptProvider,
 } from "./core/providers";
 
-// --- Watch runtime types ---
 export {
   WATCH_LIFECYCLE_KIND,
   WATCH_RUNTIME_EVENT_TYPES,
@@ -67,11 +62,6 @@ export {
   type WatchRuntime,
 } from "./core/types";
 
-// --- Provider factories (consumer-facing) ---
-// Internal provider utilities (discovery, watch factories, transcript sources,
-// debounce constants) remain accessible via subpath imports:
-//   @agentprobe/core/providers/cursor
-//   @agentprobe/core/providers/claude-code
 export {
   cursor,
   type CursorOptions,

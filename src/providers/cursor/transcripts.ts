@@ -91,7 +91,7 @@ const conversationLineSchema = z.object({
     .optional(),
 });
 
-export interface TranscriptSourceResult {
+export interface CursorTranscriptSourceResult {
   agents: CanonicalAgentSnapshot[];
   connected: boolean;
   sourceLabel: string;
@@ -107,7 +107,7 @@ export interface CursorTranscriptSource {
   readonly sourceKind: typeof CURSOR_SOURCE_KIND;
   connect(): void;
   disconnect(): void;
-  readSnapshot(now?: number): Promise<TranscriptSourceResult>;
+  readSnapshot(now?: number): Promise<CursorTranscriptSourceResult>;
 }
 
 export function createCursorTranscriptSource(
@@ -127,7 +127,7 @@ export function createCursorTranscriptSource(
     fileCache.clear();
   }
 
-  async function readSnapshot(now: number = Date.now()): Promise<TranscriptSourceResult> {
+  async function readSnapshot(now: number = Date.now()): Promise<CursorTranscriptSourceResult> {
     if (!connected) {
       return {
         agents: [],
