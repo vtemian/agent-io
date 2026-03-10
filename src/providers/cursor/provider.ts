@@ -29,10 +29,17 @@ export function cursor(options: CursorOptions = {}): TranscriptProvider {
   let connected = false;
   let cachedDiscovery: DiscoveryResult | undefined;
   let cachedFileList: string[] | undefined;
+  let cachedWorkspacePaths: string[] | undefined;
 
   function discover(workspacePaths: string[]): DiscoveryResult {
     const currentFileList = listTranscriptFileNames({ workspacePaths });
-    if (cachedDiscovery && cachedFileList && arraysEqual(currentFileList, cachedFileList)) {
+    if (
+      cachedDiscovery &&
+      cachedFileList &&
+      cachedWorkspacePaths &&
+      arraysEqual(currentFileList, cachedFileList) &&
+      arraysEqual(workspacePaths, cachedWorkspacePaths)
+    ) {
       return cachedDiscovery;
     }
 
@@ -45,6 +52,7 @@ export function cursor(options: CursorOptions = {}): TranscriptProvider {
     }));
     cachedDiscovery = { inputs, watchPaths, warnings: [] };
     cachedFileList = currentFileList;
+    cachedWorkspacePaths = [...workspacePaths];
     return cachedDiscovery;
   }
 
@@ -58,6 +66,7 @@ export function cursor(options: CursorOptions = {}): TranscriptProvider {
     source?.disconnect();
     cachedDiscovery = undefined;
     cachedFileList = undefined;
+    cachedWorkspacePaths = undefined;
   }
 
   async function read(
