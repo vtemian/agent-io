@@ -17,6 +17,8 @@ import {
 import { z } from "zod";
 import {
   AGENT_COMPLETION_QUIET_WINDOW_MS,
+  CURSOR_IDLE_WINDOW_MS,
+  CURSOR_RUNNING_WINDOW_MS,
   CURSOR_SOURCE_KIND,
   STREAMING_QUIET_WINDOW_MS,
 } from "./constants";
@@ -80,9 +82,6 @@ interface TranscriptFileCache {
   fileUpdatedAt: number;
 }
 
-const RUNNING_WINDOW_MS = 3_000;
-const IDLE_WINDOW_MS = 60_000;
-
 const conversationLineSchema = z.object({
   role: nonEmptyStringSchema,
   message: z
@@ -106,10 +105,9 @@ export interface CursorTranscriptSourceOptions {
 
 export interface CursorTranscriptSource {
   readonly sourceKind: typeof CURSOR_SOURCE_KIND;
-  connect(): Promise<void> | void;
-  disconnect(): Promise<void> | void;
-  readSnapshot(now?: number): Promise<TranscriptSourceResult> | TranscriptSourceResult;
-  getWatchPaths?(): string[];
+  connect(): void;
+  disconnect(): void;
+  readSnapshot(now?: number): Promise<TranscriptSourceResult>;
 }
 
 export function createCursorTranscriptSource(
@@ -184,9 +182,6 @@ export function createCursorTranscriptSource(
     connect,
     disconnect,
     readSnapshot,
-    getWatchPaths(): string[] {
-      return [...sourcePaths];
-    },
   };
 }
 
@@ -216,7 +211,7 @@ async function processSourceFile(
 
   const cached = fileCache.get(sourcePath);
 
-  if (cached && cached.mtimeMs === fileUpdatedAt) {
+  if (cached && cached.mtimeMs === fileUpdatedAt && cached.sizeBytes === fileSizeBytes) {
     return {
       agents: resolveAgentsFromState(cached.state, sourcePath, cached.fileUpdatedAt, now),
       success: true,
@@ -480,16 +475,16 @@ function deriveConversationStatus(
     return CANONICAL_AGENT_STATUS.completed;
   }
 
-  if (ageMs <= RUNNING_WINDOW_MS) {
+  if (ageMs <= CURSOR_RUNNING_WINDOW_MS) {
     return CANONICAL_AGENT_STATUS.running;
   }
   if (latestSignal === "active" && !hasAssistantReplyAfterLatestUser) {
-    if (ageMs <= IDLE_WINDOW_MS) {
+    if (ageMs <= CURSOR_IDLE_WINDOW_MS) {
       return CANONICAL_AGENT_STATUS.idle;
     }
     return CANONICAL_AGENT_STATUS.completed;
   }
-  if (ageMs <= IDLE_WINDOW_MS) {
+  if (ageMs <= CURSOR_IDLE_WINDOW_MS) {
     return CANONICAL_AGENT_STATUS.idle;
   }
   return CANONICAL_AGENT_STATUS.completed;

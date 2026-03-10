@@ -166,7 +166,8 @@ function subscribeAll(
     try {
       const sub = provider.watch?.subscribe(watchPath, onEvent, onError);
       return sub ? [sub] : [];
-    } catch {
+    } catch (error) {
+      onError(error instanceof Error ? error : new Error(String(error)));
       return [];
     }
   });
