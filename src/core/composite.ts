@@ -137,19 +137,7 @@ export function createCompositeProvider(providers: TranscriptProvider[]): Transc
             onEvent: () => void,
             onError: (error: Error) => void,
           ): { close(): void } {
-            // Subscribe to the first provider whose watch can handle this path
-            // All providers get the same watch paths, so delegate to each
-            const subs: { close(): void }[] = [];
-            for (const provider of watchProviders) {
-              try {
-                const sub = provider.watch?.subscribe(watchPath, onEvent, onError);
-                if (sub) {
-                  subs.push(sub);
-                }
-              } catch {
-                // Provider might not handle this path
-              }
-            }
+            const subs = subscribeAll(watchProviders, watchPath, onEvent, onError);
             return {
               close() {
                 for (const sub of subs) {
@@ -170,4 +158,20 @@ export function createCompositeProvider(providers: TranscriptProvider[]): Transc
     normalize,
     watch: compositeWatch,
   };
+}
+
+function subscribeAll(
+  watchProviders: TranscriptProvider[],
+  watchPath: string,
+  onEvent: () => void,
+  onError: (error: Error) => void,
+): { close(): void }[] {
+  return watchProviders.flatMap((provider) => {
+    try {
+      const sub = provider.watch?.subscribe(watchPath, onEvent, onError);
+      return sub ? [sub] : [];
+    } catch {
+      return [];
+    }
+  });
 }
