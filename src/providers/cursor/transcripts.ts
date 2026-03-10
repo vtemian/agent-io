@@ -7,6 +7,7 @@ import {
   type CanonicalAgentSnapshot,
   type CanonicalAgentStatus,
 } from "@/core/model";
+import { formatLineWarning } from "@/providers/shared/discovery-utils";
 import { mergeAgents, pruneStaleCache } from "@/providers/shared/provider-utils";
 import { z } from "zod";
 import {
@@ -441,10 +442,6 @@ function sanitizeTaskSummary(value: string): string {
   const match = value.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/i);
   const query = match ? match[1] : value;
   return query.replace(/\s+/g, " ").trim();
-}
-
-function formatLineWarning(sourcePath: string, lineNumber: number, reason: string): string {
-  return `${sourcePath}:${lineNumber} ${reason}`;
 }
 
 function hasErrorMarker(value: string): boolean {

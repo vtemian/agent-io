@@ -6,6 +6,7 @@ import {
   type CanonicalAgentSnapshot,
   type CanonicalAgentStatus,
 } from "@/core/model";
+import { formatLineWarning } from "@/providers/shared/discovery-utils";
 import { mergeAgents, pruneStaleCache } from "@/providers/shared/provider-utils";
 import {
   parseSessionRecord,
@@ -260,7 +261,7 @@ function accumulateLines(
     try {
       parsed = JSON.parse(line);
     } catch {
-      warnings.push(`${sourcePath}:${i + 1} Invalid JSON line.`);
+      warnings.push(formatLineWarning(sourcePath, i + 1, "Invalid JSON line."));
       continue;
     }
 
