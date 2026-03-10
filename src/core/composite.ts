@@ -6,6 +6,7 @@ import type {
   TranscriptReadResult,
 } from "./providers";
 import type { CanonicalAgentSnapshot } from "./model";
+import { groupByKey } from "@/providers/shared/provider-utils";
 
 export function createCompositeProvider(providers: TranscriptProvider[]): TranscriptProvider {
   async function discover(workspacePaths: string[]): Promise<DiscoveryResult> {
@@ -50,13 +51,10 @@ export function createCompositeProvider(providers: TranscriptProvider[]): Transc
     now: number = Date.now(),
   ): Promise<TranscriptReadResult> {
     // Group inputs by provider ID
-    const inputsByProvider = new Map<string, DiscoveryInput[]>();
-    for (const input of inputs) {
-      const providerId = (input.metadata?.providerId as string) ?? "";
-      const group = inputsByProvider.get(providerId) ?? [];
-      group.push(input);
-      inputsByProvider.set(providerId, group);
-    }
+    const inputsByProvider = groupByKey(
+      inputs,
+      (input) => (input.metadata?.providerId as string) ?? "",
+    );
 
     const allRecords: TranscriptReadResult["records"] = [];
     const allWarnings: string[] = [];
@@ -93,12 +91,7 @@ export function createCompositeProvider(providers: TranscriptProvider[]): Transc
     now: number,
   ): Promise<CanonicalSnapshot> {
     // Group records by provider
-    const recordsByProvider = new Map<string, TranscriptReadResult["records"]>();
-    for (const record of readResult.records) {
-      const group = recordsByProvider.get(record.provider) ?? [];
-      group.push(record);
-      recordsByProvider.set(record.provider, group);
-    }
+    const recordsByProvider = groupByKey(readResult.records, (record) => record.provider);
 
     const allAgents: CanonicalAgentSnapshot[] = [];
     const allWarnings: string[] = [];
