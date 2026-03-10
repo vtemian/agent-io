@@ -7,16 +7,13 @@ import {
   type TranscriptProvider,
   type TranscriptReadResult,
 } from "@/core";
+import { arraysEqual, isAgentPayload } from "@/providers/shared/provider-utils";
 import {
   listSessionFileNames,
   resolveSessionDirectories,
   resolveSessionSourcePaths,
 } from "./discovery";
-import {
-  createClaudeCodeTranscriptSource,
-  type ClaudeCodeTranscriptSource,
-  type ClaudeCodeTranscriptSourceResult,
-} from "./transcripts";
+import { createClaudeCodeTranscriptSource, type ClaudeCodeTranscriptSource } from "./transcripts";
 import { createClaudeCodeWatch, type ClaudeCodeWatchOptions } from "./watch";
 import { CLAUDE_CODE_SOURCE_KIND } from "./constants";
 
@@ -100,8 +97,8 @@ export function claudeCode(options: ClaudeCodeOptions = {}): TranscriptProvider 
 
   function normalize(readResult: TranscriptReadResult, _now: number): CanonicalSnapshot {
     const payload = readResult.records[0]?.payload;
-    const agents: CanonicalAgentSnapshot[] = isTranscriptSourceResult(payload)
-      ? payload.agents
+    const agents: CanonicalAgentSnapshot[] = isAgentPayload(payload)
+      ? (payload as { agents: CanonicalAgentSnapshot[] }).agents
       : [];
     return { agents, health: readResult.health };
   }
@@ -128,22 +125,4 @@ function ensureSource(
     return existing;
   }
   return createClaudeCodeTranscriptSource({ sourcePaths, sourceLabel });
-}
-
-function isTranscriptSourceResult(value: unknown): value is ClaudeCodeTranscriptSourceResult {
-  return (
-    typeof value === "object" && value !== null && "agents" in value && Array.isArray(value.agents)
-  );
-}
-
-function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) {
-      return false;
-    }
-  }
-  return true;
 }

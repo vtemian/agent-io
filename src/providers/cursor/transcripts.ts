@@ -7,6 +7,7 @@ import {
   type CanonicalAgentSnapshot,
   type CanonicalAgentStatus,
 } from "@/core/model";
+import { mergeAgents, pruneStaleCache } from "@/providers/shared/provider-utils";
 import { z } from "zod";
 import {
   AGENT_COMPLETION_QUIET_WINDOW_MS,
@@ -223,7 +224,7 @@ export function createCursorTranscriptSource(
       );
     }
 
-    pruneStaleEntries(fileCache, sourcePaths);
+    pruneStaleCache(fileCache, sourcePaths);
 
     const agents = orderedIds
       .map((id) => latestById.get(id))
@@ -401,39 +402,6 @@ function resolveAgentsFromState(
       source: CURSOR_SOURCE_KIND,
     },
   ];
-}
-
-// --- Merge and cache helpers ---
-
-function mergeAgents(
-  agents: CanonicalAgentSnapshot[],
-  orderedIds: string[],
-  latestById: Map<string, CanonicalAgentSnapshot>,
-): void {
-  for (const agent of agents) {
-    const existing = latestById.get(agent.id);
-    if (!existing) {
-      latestById.set(agent.id, agent);
-      orderedIds.push(agent.id);
-    } else if (agent.updatedAt > existing.updatedAt) {
-      latestById.set(agent.id, agent);
-    }
-  }
-}
-
-function pruneStaleEntries(
-  cache: Map<string, TranscriptFileCache>,
-  currentPaths: readonly string[],
-): void {
-  if (cache.size <= currentPaths.length) {
-    return;
-  }
-  const current = new Set(currentPaths);
-  for (const key of cache.keys()) {
-    if (!current.has(key)) {
-      cache.delete(key);
-    }
-  }
 }
 
 // --- Record parsing ---

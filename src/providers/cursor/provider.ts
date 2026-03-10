@@ -7,16 +7,13 @@ import {
   type TranscriptProvider,
   type TranscriptReadResult,
 } from "@/core";
+import { arraysEqual, isAgentPayload } from "@/providers/shared/provider-utils";
 import {
   listTranscriptFileNames,
   resolveTranscriptDirectories,
   resolveTranscriptSourcePaths,
 } from "./discovery";
-import {
-  createCursorTranscriptSource,
-  type CursorTranscriptSource,
-  type TranscriptSourceResult,
-} from "./transcripts";
+import { createCursorTranscriptSource, type CursorTranscriptSource } from "./transcripts";
 import { createCursorWatch, type CursorWatchOptions } from "./watch";
 import { CURSOR_SOURCE_KIND } from "./constants";
 
@@ -94,8 +91,8 @@ export function cursor(options: CursorOptions = {}): TranscriptProvider {
 
   function normalize(readResult: TranscriptReadResult, _now: number): CanonicalSnapshot {
     const payload = readResult.records[0]?.payload;
-    const agents: CanonicalAgentSnapshot[] = isTranscriptSourceResult(payload)
-      ? payload.agents
+    const agents: CanonicalAgentSnapshot[] = isAgentPayload(payload)
+      ? (payload as { agents: CanonicalAgentSnapshot[] }).agents
       : [];
     return { agents, health: readResult.health };
   }
@@ -122,22 +119,4 @@ function ensureSource(
     return existing;
   }
   return createCursorTranscriptSource({ sourcePaths, sourceLabel });
-}
-
-function isTranscriptSourceResult(value: unknown): value is TranscriptSourceResult {
-  return (
-    typeof value === "object" && value !== null && "agents" in value && Array.isArray(value.agents)
-  );
-}
-
-function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) {
-      return false;
-    }
-  }
-  return true;
 }
