@@ -489,6 +489,17 @@ function hasErrorMarker(value: string): boolean {
   return /(error|failed|exception|traceback)/i.test(value);
 }
 
+function statusAfterAssistantReply(ageMs: number): CanonicalAgentStatus {
+  if (ageMs <= STREAMING_QUIET_WINDOW_MS) return CANONICAL_AGENT_STATUS.running;
+  if (ageMs <= AGENT_COMPLETION_QUIET_WINDOW_MS) return CANONICAL_AGENT_STATUS.idle;
+  return CANONICAL_AGENT_STATUS.completed;
+}
+
+function statusWhileAwaitingAssistant(ageMs: number): CanonicalAgentStatus {
+  if (ageMs <= IDLE_WINDOW_MS) return CANONICAL_AGENT_STATUS.idle;
+  return CANONICAL_AGENT_STATUS.completed;
+}
+
 function deriveConversationStatus(
   now: number,
   updatedAt: number,
@@ -496,12 +507,8 @@ function deriveConversationStatus(
   latestRole: string | undefined,
   hasAssistantReplyAfterLatestUser: boolean,
 ): CanonicalAgentStatus {
-  if (latestSignal === "error") {
-    return CANONICAL_AGENT_STATUS.error;
-  }
-  if (latestSignal === "completed") {
-    return CANONICAL_AGENT_STATUS.completed;
-  }
+  if (latestSignal === "error") return CANONICAL_AGENT_STATUS.error;
+  if (latestSignal === "completed") return CANONICAL_AGENT_STATUS.completed;
 
   const ageMs = Math.max(0, now - updatedAt);
   const assistantDone =
@@ -509,28 +516,12 @@ function deriveConversationStatus(
     isAssistantRole(latestRole ?? "") &&
     latestSignal !== "active";
 
-  if (assistantDone) {
-    if (ageMs <= STREAMING_QUIET_WINDOW_MS) {
-      return CANONICAL_AGENT_STATUS.running;
-    }
-    if (ageMs <= AGENT_COMPLETION_QUIET_WINDOW_MS) {
-      return CANONICAL_AGENT_STATUS.idle;
-    }
-    return CANONICAL_AGENT_STATUS.completed;
-  }
-
-  if (ageMs <= RUNNING_WINDOW_MS) {
-    return CANONICAL_AGENT_STATUS.running;
-  }
+  if (assistantDone) return statusAfterAssistantReply(ageMs);
+  if (ageMs <= RUNNING_WINDOW_MS) return CANONICAL_AGENT_STATUS.running;
   if (latestSignal === "active" && !hasAssistantReplyAfterLatestUser) {
-    if (ageMs <= IDLE_WINDOW_MS) {
-      return CANONICAL_AGENT_STATUS.idle;
-    }
-    return CANONICAL_AGENT_STATUS.completed;
+    return statusWhileAwaitingAssistant(ageMs);
   }
-  if (ageMs <= IDLE_WINDOW_MS) {
-    return CANONICAL_AGENT_STATUS.idle;
-  }
+  if (ageMs <= IDLE_WINDOW_MS) return CANONICAL_AGENT_STATUS.idle;
   return CANONICAL_AGENT_STATUS.completed;
 }
 
