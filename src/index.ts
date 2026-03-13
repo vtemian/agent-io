@@ -6,6 +6,7 @@ import {
 } from "./core";
 import { createCompositeProvider } from "./core/composite";
 import { claudeCode } from "./providers/claude-code";
+import { codex } from "./providers/codex";
 import { cursor } from "./providers/cursor";
 
 export {
@@ -70,13 +71,17 @@ export {
   claudeCode,
   type ClaudeCodeOptions,
 } from "./providers/claude-code";
+export {
+  codex,
+  type CodexOptions,
+} from "./providers/codex";
 
 export interface CreateObserverOptions extends Omit<ObserverOptions, "provider"> {
   providers?: TranscriptProvider[];
 }
 
 export function createObserver(options: CreateObserverOptions): Observer {
-  const providers = options.providers ?? [cursor(), claudeCode()];
+  const providers = options.providers ?? [cursor(), claudeCode(), codex()];
   const provider = providers.length === 1 ? providers[0] : createCompositeProvider(providers);
 
   return createCoreObserver({

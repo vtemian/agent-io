@@ -1,0 +1,132 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+import {
+  collectJsonlFiles,
+  directoryExists,
+  normalizeWorkspacePath,
+  dedupePaths,
+} from "@/providers/shared/discovery";
+import { MAX_DISCOVERED_SESSION_FILES } from "./constants";
+
+export interface CodexDiscoveryOptions {
+  workspacePaths: string[];
+  codexHomePath?: string;
+  maxFiles?: number;
+}
+
+interface SessionHeader {
+  mtimeMs: number;
+  cwd: string;
+  sessionId: string;
+}
+
+const headerCache = new Map<string, SessionHeader>();
+
+function readFirstLine(filePath: string): string | undefined {
+  try {
+    const buffer = readFileSync(filePath, { encoding: "utf-8", flag: "r" });
+    const newlineIndex = buffer.indexOf("\n");
+    return newlineIndex === -1 ? buffer : buffer.slice(0, newlineIndex);
+  } catch {
+    return undefined;
+  }
+}
+
+function parseSessionHeader(filePath: string, mtimeMs: number): SessionHeader | undefined {
+  const line = readFirstLine(filePath);
+  if (!line || line.length === 0) {
+    return undefined;
+  }
+
+  try {
+    const record = JSON.parse(line);
+    if (record.type !== "session_meta") {
+      return undefined;
+    }
+    const cwd = record.payload?.cwd;
+    const sessionId = record.payload?.id ?? "";
+    if (typeof cwd !== "string" || cwd.length === 0) {
+      return undefined;
+    }
+    return { mtimeMs, cwd, sessionId };
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveCodexHome(options: CodexDiscoveryOptions): string {
+  return options.codexHomePath ?? path.join(homedir(), ".codex");
+}
+
+function getSessionHeader(filePath: string, mtimeMs: number): SessionHeader | undefined {
+  const cached = headerCache.get(filePath);
+  if (cached && cached.mtimeMs === mtimeMs) {
+    return cached;
+  }
+
+  const header = parseSessionHeader(filePath, mtimeMs);
+  if (header) {
+    headerCache.set(filePath, header);
+  } else {
+    headerCache.delete(filePath);
+  }
+  return header;
+}
+
+function matchesWorkspace(cwd: string, normalizedPaths: string[]): boolean {
+  const normalizedCwd = normalizeWorkspacePath(cwd);
+  return normalizedPaths.some((wp) => normalizedCwd === wp || normalizedCwd.startsWith(`${wp}/`));
+}
+
+export function resolveSessionsDirectory(options: CodexDiscoveryOptions): string {
+  return path.join(resolveCodexHome(options), "sessions");
+}
+
+export function resolveSessionSourcePaths(options: CodexDiscoveryOptions): string[] {
+  const maxFiles = options.maxFiles ?? MAX_DISCOVERED_SESSION_FILES;
+  const sessionsDir = resolveSessionsDirectory(options);
+
+  if (!directoryExists(sessionsDir)) {
+    return [];
+  }
+
+  const normalizedPaths = options.workspacePaths
+    .map(normalizeWorkspacePath)
+    .filter((p) => p.length > 0);
+
+  if (normalizedPaths.length === 0) {
+    return [];
+  }
+
+  const allFiles = collectJsonlFiles([sessionsDir], { recursive: true });
+
+  const matching: { path: string; mtimeMs: number }[] = [];
+
+  for (const file of allFiles) {
+    const header = getSessionHeader(file.path, file.mtimeMs);
+    if (!header) {
+      continue;
+    }
+    if (matchesWorkspace(header.cwd, normalizedPaths)) {
+      matching.push({ path: file.path, mtimeMs: file.mtimeMs });
+    }
+  }
+
+  return matching
+    .sort((left, right) => right.mtimeMs - left.mtimeMs || left.path.localeCompare(right.path))
+    .slice(0, maxFiles)
+    .map((entry) => entry.path);
+}
+
+export function listSessionFileNames(options: CodexDiscoveryOptions): string[] {
+  const sessionsDir = resolveSessionsDirectory(options);
+
+  if (!directoryExists(sessionsDir)) {
+    return [];
+  }
+
+  return dedupePaths(
+    collectJsonlFiles([sessionsDir], { recursive: true }).map((f) => f.path),
+  ).sort();
+}
