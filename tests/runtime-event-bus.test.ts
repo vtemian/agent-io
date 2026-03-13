@@ -46,7 +46,7 @@ describe("createEventBus", () => {
 
     const bus = createEventBus<TestEvent>({
       handlers: {
-        a: async (event) => {
+        a: (event) => {
           handledEvents.push(event.type);
         },
       },
@@ -66,11 +66,11 @@ describe("createEventBus", () => {
     const token = 1;
     const bus = createEventBus<TestEvent>({
       handlers: {
-        a: async (e) => {
+        a: (e) => {
           order.push(`a-${e.id}`);
           bus.dispatch({ type: "b", id: "from-a" }, token);
         },
-        b: async (e) => {
+        b: (e) => {
           order.push(`b-${e.id}`);
         },
       },

@@ -210,14 +210,9 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
     },
   });
 
-  const {
-    initializeSubscriptions,
-    clearDebounceTimer,
-    closeSubscriptions,
-    clearResubscribeTimers,
-  } = createRuntimeSubscriptions({
+  const subs = createRuntimeSubscriptions({
     watchPaths: options.watchPaths,
-    getWatchPaths: source.getWatchPaths,
+    getWatchPaths: () => source.getWatchPaths?.() ?? [],
     subscribeToChanges,
     debounceMs,
     onFileChanged: () => {
@@ -242,15 +237,15 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
         return;
       }
 
-      initializeSubscriptions(token);
+      subs.initializeSubscriptions(token);
       runtimeState.state = WATCH_RUNTIME_INTERNAL_STATES.started;
       emitStateEvent(WATCH_RUNTIME_INTERNAL_STATES.started);
       bus.dispatch({ type: RUNTIME_BUS_EVENT_TYPES.fileChanged }, token);
     } catch (error) {
       if (isTokenCurrent(token)) {
         runtimeState.state = WATCH_RUNTIME_INTERNAL_STATES.stopped;
-        clearDebounceTimer();
-        closeSubscriptions();
+        subs.clearDebounceTimer();
+        subs.closeSubscriptions();
         lifecycle.reset();
         rejectAllQueuedWaiters(error);
       }
@@ -313,10 +308,10 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
 
     runtimeState.state = WATCH_RUNTIME_INTERNAL_STATES.stopping;
     const token = nextLifecycleToken();
-    clearDebounceTimer();
+    subs.clearDebounceTimer();
     clearIdleTimer();
-    closeSubscriptions();
-    clearResubscribeTimers();
+    subs.closeSubscriptions();
+    subs.clearResubscribeTimers();
     bus.clear();
     lifecycle.reset();
 

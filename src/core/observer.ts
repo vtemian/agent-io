@@ -84,40 +84,40 @@ export function createObserver(options: ObserverOptions): Observer {
       : undefined,
   });
 
+  function handleSnapshotEvent(event: {
+    at: number;
+    snapshot: { agents: CanonicalAgentSnapshot[]; health: WatchHealth };
+  }): void {
+    previousSnapshot = latestSnapshot;
+    latestSnapshot = {
+      at: event.at,
+      agents: event.snapshot.agents,
+      health: event.snapshot.health,
+    };
+  }
+
+  function handleLifecycleEvents(events: WatchLifecycleEvent<CanonicalAgentStatus>[]): void {
+    if (!latestSnapshot) {
+      return;
+    }
+    const currentById = indexAgentsById(latestSnapshot.agents);
+    const previousById = indexAgentsById(previousSnapshot?.agents ?? []);
+    for (const change of events) {
+      const agent = resolveAgentForChange(change, currentById, previousById);
+      if (agent) {
+        emit({ change, agent, snapshot: latestSnapshot });
+      }
+    }
+  }
+
   runtime.subscribe((event) => {
     if (event.type === WATCH_RUNTIME_EVENT_TYPES.snapshot) {
-      previousSnapshot = latestSnapshot;
-      latestSnapshot = {
-        at: event.at,
-        agents: event.snapshot.agents,
-        health: event.snapshot.health,
-      };
+      handleSnapshotEvent(event);
       return;
     }
 
     if (event.type === WATCH_RUNTIME_EVENT_TYPES.lifecycle) {
-      if (!latestSnapshot) {
-        return;
-      }
-      const currentById = indexAgentsById(latestSnapshot.agents);
-      const previousById = indexAgentsById(previousSnapshot?.agents ?? []);
-      for (const change of event.events) {
-        if (change.kind === WATCH_LIFECYCLE_KIND.heartbeat) {
-          continue;
-        }
-        const agent = currentById.get(change.agentId) ?? previousById.get(change.agentId);
-        if (!agent) {
-          continue;
-        }
-        if (
-          change.kind === WATCH_LIFECYCLE_KIND.joined &&
-          (agent.status === CANONICAL_AGENT_STATUS.completed ||
-            agent.status === CANONICAL_AGENT_STATUS.error)
-        ) {
-          continue;
-        }
-        emit({ change, agent, snapshot: latestSnapshot });
-      }
+      handleLifecycleEvents(event.events);
       return;
     }
   });
@@ -179,4 +179,30 @@ function mergeSnapshotWarnings(
 
 function indexAgentsById(agents: CanonicalAgentSnapshot[]): Map<string, CanonicalAgentSnapshot> {
   return new Map(agents.map((agent) => [agent.id, agent]));
+}
+
+function isStaleJoinEvent(
+  change: WatchLifecycleEvent<CanonicalAgentStatus>,
+  agent: CanonicalAgentSnapshot,
+): boolean {
+  return (
+    change.kind === WATCH_LIFECYCLE_KIND.joined &&
+    (agent.status === CANONICAL_AGENT_STATUS.completed ||
+      agent.status === CANONICAL_AGENT_STATUS.error)
+  );
+}
+
+function resolveAgentForChange(
+  change: WatchLifecycleEvent<CanonicalAgentStatus>,
+  currentById: Map<string, CanonicalAgentSnapshot>,
+  previousById: Map<string, CanonicalAgentSnapshot>,
+): CanonicalAgentSnapshot | undefined {
+  if (change.kind === WATCH_LIFECYCLE_KIND.heartbeat) {
+    return undefined;
+  }
+  const agent = currentById.get(change.agentId) ?? previousById.get(change.agentId);
+  if (!agent || isStaleJoinEvent(change, agent)) {
+    return undefined;
+  }
+  return agent;
 }

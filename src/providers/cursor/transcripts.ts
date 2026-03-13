@@ -162,6 +162,60 @@ export function createCursorTranscriptSource(
     fileCache.clear();
   }
 
+  async function processSourcePath(
+    sourcePath: string,
+    now: number,
+    orderedIds: string[],
+    latestById: Map<string, CanonicalAgentSnapshot>,
+    warnings: string[],
+  ): Promise<"success" | "read-error"> {
+    const stats = tryStatFile(sourcePath) ?? { mtimeMs: now, sizeBytes: 0 };
+    const cached = fileCache.get(sourcePath);
+    const decision = shouldReuseCache(cached, stats);
+
+    if (decision === "full-reuse" && cached) {
+      mergeAgents(
+        resolveAgentsFromState(cached.state, sourcePath, cached.fileUpdatedAt, now),
+        orderedIds,
+        latestById,
+      );
+      return "success";
+    }
+
+    if (decision === "mtime-changed-same-size" && cached) {
+      fileCache.set(sourcePath, { ...cached, mtimeMs: stats.mtimeMs });
+      mergeAgents(
+        resolveAgentsFromState(cached.state, sourcePath, cached.fileUpdatedAt, now),
+        orderedIds,
+        latestById,
+      );
+      return "success";
+    }
+
+    let contents: string;
+    try {
+      contents = await readFile(sourcePath, "utf8");
+    } catch {
+      warnings.push(`Failed to read transcript path: ${sourcePath}`);
+      return "read-error";
+    }
+
+    const parsed = parseTranscriptFile(sourcePath, contents, cached, stats.sizeBytes, warnings);
+    fileCache.set(sourcePath, {
+      mtimeMs: stats.mtimeMs,
+      sizeBytes: stats.sizeBytes,
+      lineCount: parsed.lineCount,
+      state: cloneParseState(parsed.state),
+      fileUpdatedAt: stats.mtimeMs,
+    });
+    mergeAgents(
+      resolveAgentsFromState(parsed.state, sourcePath, stats.mtimeMs, now),
+      orderedIds,
+      latestById,
+    );
+    return "success";
+  }
+
   async function readSnapshot(now: number = Date.now()): Promise<TranscriptSourceResult> {
     if (!connected) {
       return {
@@ -187,54 +241,12 @@ export function createCursorTranscriptSource(
     let successfulReads = 0;
 
     for (const sourcePath of sourcePaths) {
-      const stats = tryStatFile(sourcePath) ?? { mtimeMs: now, sizeBytes: 0 };
-      const cached = fileCache.get(sourcePath);
-      const decision = shouldReuseCache(cached, stats);
-
-      if (decision === "full-reuse" && cached) {
+      const result = await processSourcePath(sourcePath, now, orderedIds, latestById, warnings);
+      if (result === "success") {
         successfulReads += 1;
-        mergeAgents(
-          resolveAgentsFromState(cached.state, sourcePath, cached.fileUpdatedAt, now),
-          orderedIds,
-          latestById,
-        );
-        continue;
-      }
-
-      if (decision === "mtime-changed-same-size" && cached) {
-        successfulReads += 1;
-        fileCache.set(sourcePath, { ...cached, mtimeMs: stats.mtimeMs });
-        mergeAgents(
-          resolveAgentsFromState(cached.state, sourcePath, cached.fileUpdatedAt, now),
-          orderedIds,
-          latestById,
-        );
-        continue;
-      }
-
-      let contents: string;
-      try {
-        contents = await readFile(sourcePath, "utf8");
-        successfulReads += 1;
-      } catch {
+      } else {
         hasReadError = true;
-        warnings.push(`Failed to read transcript path: ${sourcePath}`);
-        continue;
       }
-
-      const parsed = parseTranscriptFile(sourcePath, contents, cached, stats.sizeBytes, warnings);
-      fileCache.set(sourcePath, {
-        mtimeMs: stats.mtimeMs,
-        sizeBytes: stats.sizeBytes,
-        lineCount: parsed.lineCount,
-        state: cloneParseState(parsed.state),
-        fileUpdatedAt: stats.mtimeMs,
-      });
-      mergeAgents(
-        resolveAgentsFromState(parsed.state, sourcePath, stats.mtimeMs, now),
-        orderedIds,
-        latestById,
-      );
     }
 
     pruneStaleEntries(fileCache, sourcePaths);
@@ -281,7 +293,7 @@ function tryParseJsonLine(
   sourcePath: string,
   lineIndex: number,
   warnings: string[],
-): unknown | null {
+): unknown {
   try {
     return JSON.parse(line);
   } catch {

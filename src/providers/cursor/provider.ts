@@ -55,12 +55,12 @@ export function createCursorTranscriptProvider(
 
   function connect(): void {
     connected = true;
-    source?.connect();
+    void source?.connect();
   }
 
   function disconnect(): void {
     connected = false;
-    source?.disconnect();
+    void source?.disconnect();
     cachedDiscovery = undefined;
     cachedFileList = undefined;
   }
@@ -74,7 +74,7 @@ export function createCursorTranscriptProvider(
     source = ensureSource(source, sourcePaths, sourceLabel, sourcePathKey, nextSourcePathKey);
     sourcePathKey = nextSourcePathKey;
     if (connected) {
-      source.connect();
+      void source.connect();
     }
     const snapshot = await source.readSnapshot(now);
     return {
