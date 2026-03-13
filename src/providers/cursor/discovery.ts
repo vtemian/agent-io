@@ -95,6 +95,8 @@ function collectJsonlFilesRecursive(directory: string): DiscoveredTranscriptFile
   try {
     entries = readdirSync(directory, { recursive: true, encoding: "utf-8" });
   } catch {
+    // readdirSync can fail for EACCES, ENOENT, or if the path is not a directory.
+    // Return empty — discovery is best-effort across all workspace paths.
     return [];
   }
 
@@ -111,6 +113,8 @@ function tryStatSync(filePath: string): Stats | undefined {
   try {
     return statSync(filePath);
   } catch {
+    // statSync can fail if the file was deleted between readdir and stat.
+    // Return undefined so the caller skips this entry.
     return undefined;
   }
 }

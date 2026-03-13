@@ -329,7 +329,7 @@ function accumulateLines(
     if (line.length === 0) continue;
 
     const parsed = tryParseJsonLine(line, sourcePath, i, warnings);
-    if (parsed) dispatchParsedRecord(parsed, state, sourcePath, warnings, i);
+    if (parsed !== null) dispatchParsedRecord(parsed, state, sourcePath, warnings, i);
   }
 }
 

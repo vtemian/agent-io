@@ -18,6 +18,9 @@
     "enabled": true,
     "rules": {
       "recommended": true,
+      "correctness": {
+        "noUnusedVariables": "off"
+      },
       "style": {
         "noParameterAssign": "error",
         "noRestrictedImports": {
