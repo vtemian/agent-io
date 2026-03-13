@@ -309,10 +309,8 @@ export function createWatchRuntime<TAgent, TStatus extends string = string>(
 
     runtimeState.state = WATCH_RUNTIME_INTERNAL_STATES.stopping;
     const token = nextLifecycleToken();
-    subs.clearDebounceTimer();
+    subs.dispose();
     clearIdleTimer();
-    subs.closeSubscriptions();
-    subs.clearResubscribeTimers();
     bus.clear();
     lifecycle.reset();
 
