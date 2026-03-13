@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { closeSync, openSync, readSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import {
@@ -23,13 +23,25 @@ interface SessionHeader {
 
 const headerCache = new Map<string, SessionHeader>();
 
+const FIRST_LINE_BUFFER_SIZE = 4096;
+
 function readFirstLine(filePath: string): string | undefined {
+  let fd: number;
   try {
-    const buffer = readFileSync(filePath, { encoding: "utf-8", flag: "r" });
-    const newlineIndex = buffer.indexOf("\n");
-    return newlineIndex === -1 ? buffer : buffer.slice(0, newlineIndex);
+    fd = openSync(filePath, "r");
   } catch {
     return undefined;
+  }
+  try {
+    const buf = Buffer.alloc(FIRST_LINE_BUFFER_SIZE);
+    const bytesRead = readSync(fd, buf, 0, FIRST_LINE_BUFFER_SIZE, 0);
+    const chunk = buf.toString("utf-8", 0, bytesRead);
+    const newlineIndex = chunk.indexOf("\n");
+    return newlineIndex === -1 ? chunk : chunk.slice(0, newlineIndex);
+  } catch {
+    return undefined;
+  } finally {
+    closeSync(fd);
   }
 }
 

@@ -322,9 +322,9 @@ function accumulateResponseItem(state: SessionParseState, record: ResponseItem):
     return;
   }
 
-  if (payload.type === "function_call") {
+  if (payload.type === "function_call" || payload.type === "custom_tool_call") {
     state.toolCallCount += 1;
-    state.latestRecordType = "function_call";
+    state.latestRecordType = payload.type;
     return;
   }
 }

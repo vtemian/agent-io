@@ -6,6 +6,7 @@ import {
   type TranscriptProvider,
   type TranscriptReadResult,
 } from "@/core";
+import { directoryExists } from "@/providers/shared/discovery";
 import { arraysEqual, normalizeFromPayload } from "@/providers/shared/providers";
 import { CODEX_SOURCE_KIND } from "./constants";
 import {
@@ -55,7 +56,8 @@ export function codex(options: CodexOptions = {}): TranscriptProvider {
       kind: "file",
       metadata: { providerId: PROVIDER_KINDS.codex },
     }));
-    cachedDiscovery = { inputs, watchPaths: [sessionsDir], warnings: [] };
+    const watchPaths = directoryExists(sessionsDir) ? [sessionsDir] : [];
+    cachedDiscovery = { inputs, watchPaths, warnings: [] };
     cachedFileList = currentFileList;
     cachedWorkspacePaths = [...workspacePaths];
     return cachedDiscovery;

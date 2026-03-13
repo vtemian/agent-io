@@ -104,10 +104,11 @@ export function parseSessionRecord(value: unknown): ClaudeCodeSessionRecord | nu
     return null;
   }
 
-  const schema = recordSchemaByType[value.type as string];
-  if (!schema) {
+  const type = value.type;
+  if (typeof type !== "string" || !Object.hasOwn(recordSchemaByType, type)) {
     return null;
   }
+  const schema = recordSchemaByType[type];
 
   const result = schema.safeParse(value);
   return result.success ? result.data : null;
