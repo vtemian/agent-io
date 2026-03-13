@@ -1,4 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
+import { statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   CANONICAL_AGENT_KIND,
@@ -105,6 +106,43 @@ export interface CursorTranscriptSource {
   getWatchPaths?(): string[];
 }
 
+// --- readSnapshot helpers ---
+
+function tryStatFile(sourcePath: string): { mtimeMs: number; sizeBytes: number } | null {
+  try {
+    const stats = statSync(sourcePath);
+    return { mtimeMs: Math.round(stats.mtimeMs), sizeBytes: stats.size };
+  } catch {
+    // File may have been deleted between discovery and read.
+    return null;
+  }
+}
+
+function shouldReuseCache(
+  cached: TranscriptFileCache | undefined,
+  stats: { mtimeMs: number; sizeBytes: number },
+): "full-reuse" | "mtime-changed-same-size" | "needs-parse" {
+  if (!cached) return "needs-parse";
+  if (cached.mtimeMs === stats.mtimeMs) return "full-reuse";
+  if (cached.sizeBytes === stats.sizeBytes) return "mtime-changed-same-size";
+  return "needs-parse";
+}
+
+function parseTranscriptFile(
+  sourcePath: string,
+  contents: string,
+  cached: TranscriptFileCache | undefined,
+  sizeBytes: number,
+  warnings: string[],
+): { state: TranscriptParseState; lineCount: number } {
+  const lines = contents.split(/\r?\n/);
+  const canResume = cached && sizeBytes >= cached.sizeBytes && lines.length >= cached.lineCount;
+  const startLine = canResume ? cached.lineCount : 0;
+  const state = canResume ? cloneParseState(cached.state) : createInitialParseState();
+  accumulateLines(state, lines, startLine, sourcePath, warnings);
+  return { state, lineCount: lines.length };
+}
+
 export function createCursorTranscriptSource(
   options: CursorTranscriptSourceOptions,
 ): CursorTranscriptSource {
@@ -131,7 +169,6 @@ export function createCursorTranscriptSource(
         warnings: ["Cursor transcript source is disconnected."],
       };
     }
-
     if (sourcePaths.length === 0) {
       return {
         agents: [],
@@ -148,19 +185,11 @@ export function createCursorTranscriptSource(
     let successfulReads = 0;
 
     for (const sourcePath of sourcePaths) {
-      let fileUpdatedAt = now;
-      let fileSizeBytes = 0;
-      try {
-        const stats = await stat(sourcePath);
-        fileUpdatedAt = Math.round(stats.mtimeMs);
-        fileSizeBytes = stats.size;
-      } catch {
-        // Keep default now timestamp when stat access fails.
-      }
-
+      const stats = tryStatFile(sourcePath) ?? { mtimeMs: now, sizeBytes: 0 };
       const cached = fileCache.get(sourcePath);
+      const decision = shouldReuseCache(cached, stats);
 
-      if (cached && cached.mtimeMs === fileUpdatedAt) {
+      if (decision === "full-reuse" && cached) {
         successfulReads += 1;
         mergeAgents(
           resolveAgentsFromState(cached.state, sourcePath, cached.fileUpdatedAt, now),
@@ -170,14 +199,11 @@ export function createCursorTranscriptSource(
         continue;
       }
 
-      const contentChanged = !cached || fileSizeBytes !== cached.sizeBytes;
-      const effectiveUpdatedAt = contentChanged ? fileUpdatedAt : cached.fileUpdatedAt;
-
-      if (cached && !contentChanged) {
+      if (decision === "mtime-changed-same-size" && cached) {
         successfulReads += 1;
-        fileCache.set(sourcePath, { ...cached, mtimeMs: fileUpdatedAt });
+        fileCache.set(sourcePath, { ...cached, mtimeMs: stats.mtimeMs });
         mergeAgents(
-          resolveAgentsFromState(cached.state, sourcePath, effectiveUpdatedAt, now),
+          resolveAgentsFromState(cached.state, sourcePath, cached.fileUpdatedAt, now),
           orderedIds,
           latestById,
         );
@@ -194,47 +220,27 @@ export function createCursorTranscriptSource(
         continue;
       }
 
-      const lines = contents.split(/\r?\n/);
-      let state: TranscriptParseState;
-      let startLine: number;
-
-      if (cached && fileSizeBytes >= cached.sizeBytes && lines.length >= cached.lineCount) {
-        state = cloneParseState(cached.state);
-        startLine = cached.lineCount;
-      } else {
-        state = createInitialParseState();
-        startLine = 0;
-      }
-
-      accumulateLines(state, lines, startLine, sourcePath, warnings);
-
+      const parsed = parseTranscriptFile(sourcePath, contents, cached, stats.sizeBytes, warnings);
       fileCache.set(sourcePath, {
-        mtimeMs: fileUpdatedAt,
-        sizeBytes: fileSizeBytes,
-        lineCount: lines.length,
-        state: cloneParseState(state),
-        fileUpdatedAt: effectiveUpdatedAt,
+        mtimeMs: stats.mtimeMs,
+        sizeBytes: stats.sizeBytes,
+        lineCount: parsed.lineCount,
+        state: cloneParseState(parsed.state),
+        fileUpdatedAt: stats.mtimeMs,
       });
-
       mergeAgents(
-        resolveAgentsFromState(state, sourcePath, effectiveUpdatedAt, now),
+        resolveAgentsFromState(parsed.state, sourcePath, stats.mtimeMs, now),
         orderedIds,
         latestById,
       );
     }
 
     pruneStaleEntries(fileCache, sourcePaths);
-
     const agents = orderedIds
       .map((id) => latestById.get(id))
       .filter((agent): agent is CanonicalAgentSnapshot => agent !== undefined);
 
-    return {
-      agents,
-      connected: successfulReads > 0 || !hasReadError,
-      sourceLabel,
-      warnings,
-    };
+    return { agents, connected: successfulReads > 0 || !hasReadError, sourceLabel, warnings };
   }
 
   return {
