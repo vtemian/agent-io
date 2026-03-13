@@ -274,6 +274,35 @@ function cloneParseState(state: TranscriptParseState): TranscriptParseState {
 
 // --- Incremental line parser ---
 
+function tryParseJsonLine(
+  line: string,
+  sourcePath: string,
+  lineIndex: number,
+  warnings: string[],
+): unknown | null {
+  try {
+    return JSON.parse(line);
+  } catch {
+    warnings.push(formatLineWarning(sourcePath, lineIndex + 1, "Invalid JSON line."));
+    return null;
+  }
+}
+
+function dispatchParsedRecord(
+  parsed: unknown,
+  state: TranscriptParseState,
+  sourcePath: string,
+  warnings: string[],
+  lineIndex: number,
+): void {
+  const flatRecord = parseFlatRecord(parsed);
+  if (flatRecord) {
+    accumulateFlatRecord(state, flatRecord, sourcePath, warnings, lineIndex);
+  } else {
+    accumulateConversationLine(state, parsed, sourcePath, warnings, lineIndex);
+  }
+}
+
 function accumulateLines(
   state: TranscriptParseState,
   lines: string[],
@@ -283,25 +312,10 @@ function accumulateLines(
 ): void {
   for (let i = startIndex; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (line.length === 0) {
-      continue;
-    }
+    if (line.length === 0) continue;
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      warnings.push(formatLineWarning(sourcePath, i + 1, "Invalid JSON line."));
-      continue;
-    }
-
-    const record = parseFlatRecord(parsed);
-    if (!record) {
-      accumulateConversationLine(state, parsed, sourcePath, warnings, i);
-      continue;
-    }
-
-    accumulateFlatRecord(state, record, sourcePath, warnings, i);
+    const parsed = tryParseJsonLine(line, sourcePath, i, warnings);
+    if (parsed) dispatchParsedRecord(parsed, state, sourcePath, warnings, i);
   }
 }
 
