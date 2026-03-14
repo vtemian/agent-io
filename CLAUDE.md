@@ -6,7 +6,7 @@
 - No nesting beyond 2 levels inside a function body
 - Max function length: 25 lines of logic
 - No magic numbers/strings — use named constants
-- No `any` types, no type assertions (`as Type`) — use type guards
+- No `any` types, no type assertions (`as Type`), minimize `unknown` — use Zod schemas or type guards
 - No comments explaining *what* — only *why* when non-obvious
 - Double quotes, semicolons, trailing commas (enforced by Biome)
 
