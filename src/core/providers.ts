@@ -5,7 +5,7 @@ export const PROVIDER_KINDS = {
   cursor: "cursor",
   codex: "codex",
   claudeCode: "claude-code",
-  opencode: "opencode",
+  openCode: "opencode",
 } as const;
 export type ProviderKind = (typeof PROVIDER_KINDS)[keyof typeof PROVIDER_KINDS];
 
