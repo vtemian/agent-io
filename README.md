@@ -1,6 +1,6 @@
 # @agentprobe/core
 
-[![CI](https://github.com/vtemian/agentprobe/actions/workflows/ci.yml/badge.svg)](https://github.com/vtemian/agentprobe/actions/workflows/ci.yml)
+[![Quality Gate](https://github.com/vtemian/agentprobe/actions/workflows/quality-gate.yml/badge.svg)](https://github.com/vtemian/agentprobe/actions/workflows/quality-gate.yml)
 [![npm version](https://img.shields.io/npm/v/@agentprobe/core)](https://www.npmjs.com/package/@agentprobe/core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
