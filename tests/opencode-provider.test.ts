@@ -1,34 +1,10 @@
-import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PROVIDER_KINDS } from "@/core/providers";
 import { openCode } from "@/providers/opencode/provider";
-
-function createTestDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE project (
-      id TEXT PRIMARY KEY, worktree TEXT NOT NULL,
-      time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL
-    );
-    CREATE TABLE session (
-      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT,
-      slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL,
-      version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL
-    );
-    CREATE TABLE message (
-      id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
-      time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL
-    );
-    CREATE TABLE part (
-      id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL,
-      time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL
-    );
-  `);
-  return db;
-}
+import { createTestDb, seedMessage, seedProject } from "./opencode-fixtures";
 
 describe("opencode provider", () => {
-  let db: Database.Database;
+  let db: ReturnType<typeof createTestDb>;
 
   beforeEach(() => {
     db = createTestDb();
@@ -79,31 +55,19 @@ describe("opencode provider", () => {
       now,
       now,
     );
-    db.prepare("INSERT INTO message VALUES (?, ?, ?, ?, ?)").run(
-      "m1",
-      "ses_abc",
-      now,
-      now,
-      JSON.stringify({
-        role: "user",
-        time: { created: now },
-        agent: "commander",
-        summary: { title: "Fix the bug" },
-      }),
-    );
-    db.prepare("INSERT INTO message VALUES (?, ?, ?, ?, ?)").run(
-      "m2",
-      "ses_abc",
-      now,
-      now,
-      JSON.stringify({
-        role: "assistant",
-        time: { created: now },
-        agent: "commander",
-        modelID: "claude-opus-4-6",
-        providerID: "anthropic",
-      }),
-    );
+    seedMessage(db, "m1", "ses_abc", {
+      role: "user",
+      time: { created: now },
+      agent: "commander",
+      summary: { title: "Fix the bug" },
+    });
+    seedMessage(db, "m2", "ses_abc", {
+      role: "assistant",
+      time: { created: now },
+      agent: "commander",
+      modelID: "claude-opus-4-6",
+      providerID: "anthropic",
+    });
 
     const provider = openCode({ _testDb: db });
     provider.connect?.();
@@ -145,20 +109,8 @@ describe("opencode provider", () => {
       now,
       now,
     );
-    db.prepare("INSERT INTO message VALUES (?, ?, ?, ?, ?)").run(
-      "m1",
-      "ses_parent",
-      now,
-      now,
-      JSON.stringify({ role: "user", time: { created: now } }),
-    );
-    db.prepare("INSERT INTO message VALUES (?, ?, ?, ?, ?)").run(
-      "m2",
-      "ses_child",
-      now,
-      now,
-      JSON.stringify({ role: "user", time: { created: now } }),
-    );
+    seedMessage(db, "m1", "ses_parent", { role: "user", time: { created: now } });
+    seedMessage(db, "m2", "ses_child", { role: "user", time: { created: now } });
 
     const provider = openCode({ _testDb: db });
     provider.connect?.();
@@ -209,13 +161,7 @@ describe("opencode provider", () => {
       now - 120_000,
     );
     for (const sid of ["ses_running", "ses_idle", "ses_done"]) {
-      db.prepare("INSERT INTO message VALUES (?, ?, ?, ?, ?)").run(
-        `m_${sid}`,
-        sid,
-        now,
-        now,
-        JSON.stringify({ role: "user", time: { created: now } }),
-      );
+      seedMessage(db, `m_${sid}`, sid, { role: "user", time: { created: now } });
     }
 
     const provider = openCode({ _testDb: db });
@@ -230,5 +176,21 @@ describe("opencode provider", () => {
     expect(running?.status).toBe("running");
     expect(idle?.status).toBe("idle");
     expect(done?.status).toBe("completed");
+  });
+
+  it("returns warning after disconnect", async () => {
+    seedProject(db, "p1", "/test");
+
+    const provider = openCode({ _testDb: db });
+    provider.connect?.();
+
+    const beforeDisconnect = await provider.discover(["/test"]);
+    expect(beforeDisconnect.warnings).toHaveLength(0);
+
+    provider.disconnect?.();
+
+    const afterDisconnect = await provider.discover(["/test"]);
+    expect(afterDisconnect.inputs).toHaveLength(0);
+    expect(afterDisconnect.warnings).toContain("OpenCode database not found.");
   });
 });

@@ -31,6 +31,34 @@ describe("opencode watch", () => {
     handle.close();
   });
 
+  it("fires onEvent on first successful tick after initial failure", () => {
+    let callCount = 0;
+    const onEvent = vi.fn();
+    const onError = vi.fn();
+    const watch = createOpenCodeWatch({
+      pollIntervalMs: 500,
+      getDataVersion: () => {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error("db not ready");
+        }
+        return 1;
+      },
+    });
+
+    const handle = watch.subscribe("unused", onEvent, onError);
+
+    expect(onError).toHaveBeenCalledOnce();
+
+    vi.advanceTimersByTime(500);
+    expect(onEvent).toHaveBeenCalledOnce();
+
+    vi.advanceTimersByTime(500);
+    expect(onEvent).toHaveBeenCalledOnce();
+
+    handle.close();
+  });
+
   it("does not fire onEvent when data version stays the same", () => {
     const onEvent = vi.fn();
     const onError = vi.fn();

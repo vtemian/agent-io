@@ -1,103 +1,11 @@
-import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createOpenCodeDatabase, type OpenCodeDatabase } from "@/providers/opencode/database";
+import { createTestDb, seedMessage, seedPart, seedProject, seedSession } from "./opencode-fixtures";
 
-function createTestDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE project (
-      id TEXT PRIMARY KEY,
-      worktree TEXT NOT NULL,
-      time_created INTEGER NOT NULL,
-      time_updated INTEGER NOT NULL
-    );
-    CREATE TABLE session (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      parent_id TEXT,
-      slug TEXT NOT NULL,
-      directory TEXT NOT NULL,
-      title TEXT NOT NULL,
-      version TEXT NOT NULL,
-      time_created INTEGER NOT NULL,
-      time_updated INTEGER NOT NULL,
-      FOREIGN KEY (project_id) REFERENCES project(id)
-    );
-    CREATE TABLE message (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      time_created INTEGER NOT NULL,
-      time_updated INTEGER NOT NULL,
-      data TEXT NOT NULL,
-      FOREIGN KEY (session_id) REFERENCES session(id)
-    );
-    CREATE TABLE part (
-      id TEXT PRIMARY KEY,
-      message_id TEXT NOT NULL,
-      session_id TEXT NOT NULL,
-      time_created INTEGER NOT NULL,
-      time_updated INTEGER NOT NULL,
-      data TEXT NOT NULL,
-      FOREIGN KEY (message_id) REFERENCES message(id)
-    );
-  `);
-  return db;
-}
-
-function seedProject(db: Database.Database, id: string, worktree: string): void {
-  db.prepare(
-    "INSERT INTO project (id, worktree, time_created, time_updated) VALUES (?, ?, ?, ?)",
-  ).run(id, worktree, Date.now(), Date.now());
-}
-
-function seedSession(
-  db: Database.Database,
-  id: string,
-  projectId: string,
-  opts: { parentId?: string; title?: string; directory?: string; timeUpdated?: number } = {},
-): void {
-  db.prepare(
-    "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-  ).run(
-    id,
-    projectId,
-    opts.parentId ?? null,
-    "test-slug",
-    opts.directory ?? "/test",
-    opts.title ?? "Test session",
-    "1.2.24",
-    Date.now(),
-    opts.timeUpdated ?? Date.now(),
-  );
-}
-
-function seedMessage(
-  db: Database.Database,
-  id: string,
-  sessionId: string,
-  data: Record<string, unknown>,
-  timeCreated?: number,
-): void {
-  const ts = timeCreated ?? Date.now();
-  db.prepare(
-    "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)",
-  ).run(id, sessionId, ts, ts, JSON.stringify(data));
-}
-
-function seedPart(
-  db: Database.Database,
-  id: string,
-  messageId: string,
-  sessionId: string,
-  data: Record<string, unknown>,
-): void {
-  db.prepare(
-    "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)",
-  ).run(id, messageId, sessionId, Date.now(), Date.now(), JSON.stringify(data));
-}
+const MS_PER_DAY = 86_400_000;
 
 describe("opencode database", () => {
-  let rawDb: Database.Database;
+  let rawDb: ReturnType<typeof createTestDb>;
   let ocDb: OpenCodeDatabase;
 
   beforeEach(() => {
@@ -132,6 +40,13 @@ describe("opencode database", () => {
       const ids = ocDb.findProjectIds(["/other"]);
       expect(ids).toEqual([]);
     });
+
+    it("returns empty array for empty workspace paths", () => {
+      seedProject(rawDb, "p1", "/Users/test/projectA");
+
+      const ids = ocDb.findProjectIds([]);
+      expect(ids).toEqual([]);
+    });
   });
 
   describe("findSessions", () => {
@@ -140,10 +55,10 @@ describe("opencode database", () => {
       seedSession(rawDb, "s1", "p1", { title: "Session 1", timeUpdated: Date.now() });
       seedSession(rawDb, "s2", "p1", {
         title: "Session 2",
-        timeUpdated: Date.now() - 86400000 * 30,
+        timeUpdated: Date.now() - MS_PER_DAY * 30,
       });
 
-      const sessions = ocDb.findSessions(["p1"], Date.now() - 86400000 * 7);
+      const sessions = ocDb.findSessions(["p1"], Date.now() - MS_PER_DAY * 7);
       expect(sessions).toHaveLength(1);
       expect(sessions[0].id).toBe("s1");
     });
@@ -157,6 +72,14 @@ describe("opencode database", () => {
       const sub = sessions.find((s) => s.id === "s2");
       expect(sub).toBeDefined();
       expect(sub?.parentId).toBe("s1");
+    });
+
+    it("returns empty array for empty projectIds", () => {
+      seedProject(rawDb, "p1", "/test");
+      seedSession(rawDb, "s1", "p1");
+
+      const sessions = ocDb.findSessions([], 0);
+      expect(sessions).toEqual([]);
     });
   });
 
@@ -181,6 +104,11 @@ describe("opencode database", () => {
       expect(stats.get("s1")?.toolCallCount).toBe(2);
       expect(stats.get("s1")?.latestAgent).toBe("commander");
       expect(stats.get("s1")?.latestModel).toBe("claude-opus-4-6");
+    });
+
+    it("returns empty map for empty sessionIds", () => {
+      const stats = ocDb.getSessionStats([]);
+      expect(stats.size).toBe(0);
     });
   });
 

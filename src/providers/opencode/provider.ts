@@ -44,6 +44,9 @@ export function openCode(options: OpenCodeOptions = {}): TranscriptProvider {
   let cachedWorkspaceKey: string | undefined;
 
   function openDb(): void {
+    if (db && ocDb) {
+      return;
+    }
     if (db) {
       ocDb = createOpenCodeDatabase(db);
       return;
@@ -51,7 +54,6 @@ export function openCode(options: OpenCodeOptions = {}): TranscriptProvider {
     const dbPath = options.dbPath ?? OPENCODE_DB_PATH_DEFAULT;
     try {
       db = new betterSqlite3(dbPath, { readonly: true });
-      db.pragma("journal_mode = WAL");
       ocDb = createOpenCodeDatabase(db);
     } catch {
       db = undefined;

@@ -34,7 +34,7 @@ export function createOpenCodeWatch(config: OpenCodeWatchConfig): OpenCodeWatch 
     const timer = setInterval(() => {
       try {
         const currentVersion = config.getDataVersion();
-        if (lastVersion !== undefined && currentVersion !== lastVersion) {
+        if (lastVersion === undefined || currentVersion !== lastVersion) {
           onEvent();
         }
         lastVersion = currentVersion;
