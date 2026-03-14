@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { DiscoveryResult } from "@/core/providers";
 import { PROVIDER_KINDS } from "@/core/providers";
 import { openCode } from "@/providers/opencode/provider";
 
@@ -47,7 +48,7 @@ describe("opencode provider", () => {
     );
 
     const provider = openCode({ _testDb: db });
-    const result = provider.discover(["/Users/test/myproject"]);
+    const result = provider.discover(["/Users/test/myproject"]) as DiscoveryResult;
     expect(result.inputs).toHaveLength(1);
     expect(result.inputs[0].metadata?.providerId).toBe(PROVIDER_KINDS.openCode);
   });
@@ -61,7 +62,7 @@ describe("opencode provider", () => {
     );
 
     const provider = openCode({ _testDb: db });
-    const result = provider.discover(["/Users/test/myproject"]);
+    const result = provider.discover(["/Users/test/myproject"]) as DiscoveryResult;
     expect(result.inputs).toHaveLength(0);
   });
 
@@ -107,12 +108,12 @@ describe("opencode provider", () => {
 
     const provider = openCode({ _testDb: db });
     provider.connect?.();
-    const discovery = provider.discover(["/test"]);
+    const discovery = provider.discover(["/test"]) as DiscoveryResult;
     const readResult = await provider.read(discovery.inputs, now);
 
     expect(readResult.health.connected).toBe(true);
 
-    const snapshot = provider.normalize(readResult, now);
+    const snapshot = await provider.normalize(readResult, now);
     expect(snapshot.agents).toHaveLength(1);
     expect(snapshot.agents[0].id).toBe("ses_abc");
     expect(snapshot.agents[0].taskSummary).toBe("Fix the bug");
@@ -162,9 +163,9 @@ describe("opencode provider", () => {
 
     const provider = openCode({ _testDb: db });
     provider.connect?.();
-    const discovery = provider.discover(["/test"]);
+    const discovery = provider.discover(["/test"]) as DiscoveryResult;
     const readResult = await provider.read(discovery.inputs, now);
-    const snapshot = provider.normalize(readResult, now);
+    const snapshot = await provider.normalize(readResult, now);
 
     const parent = snapshot.agents.find((a) => a.id === "ses_parent");
     const child = snapshot.agents.find((a) => a.id === "ses_child");
@@ -220,9 +221,9 @@ describe("opencode provider", () => {
 
     const provider = openCode({ _testDb: db });
     provider.connect?.();
-    const discovery = provider.discover(["/test"]);
+    const discovery = provider.discover(["/test"]) as DiscoveryResult;
     const readResult = await provider.read(discovery.inputs, now);
-    const snapshot = provider.normalize(readResult, now);
+    const snapshot = await provider.normalize(readResult, now);
 
     const running = snapshot.agents.find((a) => a.id === "ses_running");
     const idle = snapshot.agents.find((a) => a.id === "ses_idle");

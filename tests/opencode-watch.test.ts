@@ -66,7 +66,7 @@ describe("opencode watch", () => {
     shouldThrow = true;
     vi.advanceTimersByTime(500);
     expect(onError).toHaveBeenCalledOnce();
-    expect(onError.mock.calls[0][0].message).toBe("db gone");
+    expect((onError.mock.calls[0][0] as Error).message).toBe("db gone");
 
     handle.close();
   });

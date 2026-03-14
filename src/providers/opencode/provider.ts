@@ -1,4 +1,4 @@
-import BetterSqlite3 from "better-sqlite3";
+import betterSqlite3 from "better-sqlite3";
 import {
   type CanonicalSnapshot,
   type DiscoveryInput,
@@ -32,15 +32,15 @@ export interface OpenCodeOptions {
   sessionWindowMs?: number;
   watch?: false | { pollIntervalMs?: number };
   /** @internal for testing — inject an open database */
-  _testDb?: BetterSqlite3.Database;
+  _testDb?: betterSqlite3.Database;
 }
 
 export function openCode(options: OpenCodeOptions = {}): TranscriptProvider {
   const sourceLabel = options.sourceLabel ?? OPENCODE_SOURCE_KIND;
   const sessionWindowMs = options.sessionWindowMs ?? OPENCODE_SESSION_WINDOW_MS;
-  let db: BetterSqlite3.Database | undefined = options._testDb;
+  let db: betterSqlite3.Database | undefined = options._testDb;
   let ocDb: OpenCodeDatabase | undefined = db ? createOpenCodeDatabase(db) : undefined;
-  let connected = false;
+  let _connected = false;
   let cachedProjectIds: string[] | undefined;
   let cachedWorkspaceKey: string | undefined;
 
@@ -51,7 +51,7 @@ export function openCode(options: OpenCodeOptions = {}): TranscriptProvider {
     }
     const dbPath = options.dbPath ?? OPENCODE_DB_PATH_DEFAULT;
     try {
-      db = new BetterSqlite3(dbPath, { readonly: true });
+      db = new betterSqlite3(dbPath, { readonly: true });
       db.pragma("journal_mode = WAL");
       ocDb = createOpenCodeDatabase(db);
     } catch {
@@ -82,12 +82,12 @@ export function openCode(options: OpenCodeOptions = {}): TranscriptProvider {
         });
 
   function connect(): void {
-    connected = true;
+    _connected = true;
     openDb();
   }
 
   function disconnect(): void {
-    connected = false;
+    _connected = false;
     closeDb();
     cachedProjectIds = undefined;
     cachedWorkspaceKey = undefined;
@@ -124,10 +124,7 @@ export function openCode(options: OpenCodeOptions = {}): TranscriptProvider {
     return { inputs, watchPaths: [dbPath], warnings: [] };
   }
 
-  async function read(
-    inputs: DiscoveryInput[],
-    now: number = Date.now(),
-  ): Promise<TranscriptReadResult> {
+  function read(inputs: DiscoveryInput[], now: number = Date.now()): TranscriptReadResult {
     if (!ocDb || inputs.length === 0) {
       return {
         records: [],

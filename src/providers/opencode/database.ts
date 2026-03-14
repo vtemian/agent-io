@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type database from "better-sqlite3";
 import { normalizeWorkspacePath } from "@/providers/shared/discovery";
 import { parseSessionRow, type SessionRow } from "./schemas";
 
@@ -17,7 +17,7 @@ export interface OpenCodeDatabase {
   getDataVersion(): number;
 }
 
-export function createOpenCodeDatabase(db: Database.Database): OpenCodeDatabase {
+export function createOpenCodeDatabase(db: database.Database): OpenCodeDatabase {
   function findProjectIds(workspacePaths: string[]): string[] {
     const normalizedPaths = workspacePaths.map(normalizeWorkspacePath).filter((p) => p.length > 0);
 
@@ -69,25 +69,25 @@ export function createOpenCodeDatabase(db: Database.Database): OpenCodeDatabase 
 
     const messageCounts = db
       .prepare(
-        `SELECT session_id, COUNT(*) as cnt
+        `SELECT session_id as sessionId, COUNT(*) as cnt
          FROM message WHERE session_id IN (${placeholders})
          GROUP BY session_id`,
       )
-      .all(...sessionIds) as Array<{ session_id: string; cnt: number }>;
+      .all(...sessionIds) as Array<{ sessionId: string; cnt: number }>;
 
     const toolCounts = db
       .prepare(
-        `SELECT p.session_id, COUNT(*) as cnt
+        `SELECT p.session_id as sessionId, COUNT(*) as cnt
          FROM part p
          WHERE p.session_id IN (${placeholders})
            AND json_extract(p.data, '$.type') = 'tool'
          GROUP BY p.session_id`,
       )
-      .all(...sessionIds) as Array<{ session_id: string; cnt: number }>;
+      .all(...sessionIds) as Array<{ sessionId: string; cnt: number }>;
 
     const latestAssistants = db
       .prepare(
-        `SELECT session_id,
+        `SELECT session_id as sessionId,
                 json_extract(data, '$.agent') as agent,
                 json_extract(data, '$.modelID') as model
          FROM message
@@ -96,15 +96,15 @@ export function createOpenCodeDatabase(db: Database.Database): OpenCodeDatabase 
          ORDER BY time_created DESC`,
       )
       .all(...sessionIds) as Array<{
-      session_id: string;
+      sessionId: string;
       agent: string | null;
       model: string | null;
     }>;
 
     for (const id of sessionIds) {
-      const msgRow = messageCounts.find((r) => r.session_id === id);
-      const toolRow = toolCounts.find((r) => r.session_id === id);
-      const assistantRow = latestAssistants.find((r) => r.session_id === id);
+      const msgRow = messageCounts.find((r) => r.sessionId === id);
+      const toolRow = toolCounts.find((r) => r.sessionId === id);
+      const assistantRow = latestAssistants.find((r) => r.sessionId === id);
       result.set(id, {
         messageCount: msgRow?.cnt ?? 0,
         toolCallCount: toolRow?.cnt ?? 0,
@@ -139,8 +139,9 @@ export function createOpenCodeDatabase(db: Database.Database): OpenCodeDatabase 
   }
 
   function getDataVersion(): number {
-    const row = db.prepare("PRAGMA data_version").get() as { data_version: number } | undefined;
-    return row?.data_version ?? 0;
+    const row = db.prepare("PRAGMA data_version").get() as Record<string, unknown> | undefined;
+    const version = row?.data_version;
+    return typeof version === "number" ? version : 0;
   }
 
   return {
