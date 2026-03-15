@@ -51,9 +51,11 @@ export function createObserver(options: ObserverOptions): Observer {
   let latestSnapshot: ObserverSnapshot | undefined;
   let previousSnapshot: ObserverSnapshot | undefined;
   let discovery: DiscoveryResult | undefined;
+  let startedAt = 0;
 
   const source: WatchSource<CanonicalAgentSnapshot> = {
     connect: async () => {
+      startedAt = now();
       discovery = await options.provider.discover(workspacePaths);
       await options.provider.connect?.();
     },
@@ -103,7 +105,7 @@ export function createObserver(options: ObserverOptions): Observer {
     const currentById = indexAgentsById(latestSnapshot.agents);
     const previousById = indexAgentsById(previousSnapshot?.agents ?? []);
     for (const change of events) {
-      const agent = resolveAgentForChange(change, currentById, previousById);
+      const agent = resolveAgentForChange(change, currentById, previousById, startedAt);
       if (agent) {
         emit({ change, agent, snapshot: latestSnapshot });
       }
@@ -147,6 +149,7 @@ export function createObserver(options: ObserverOptions): Observer {
     latestSnapshot = undefined;
     previousSnapshot = undefined;
     discovery = undefined;
+    startedAt = 0;
   }
 
   return {
@@ -184,11 +187,16 @@ function indexAgentsById(agents: CanonicalAgentSnapshot[]): Map<string, Canonica
 function isStaleJoinEvent(
   change: WatchLifecycleEvent<CanonicalAgentStatus>,
   agent: CanonicalAgentSnapshot,
+  observerStartedAt: number,
 ): boolean {
+  // Only filter agents that were already completed/errored before the
+  // observer started. Sessions that completed after startup are genuine
+  // new events — even if they finished before the next poll.
   return (
     change.kind === WATCH_LIFECYCLE_KIND.joined &&
     (agent.status === CANONICAL_AGENT_STATUS.completed ||
-      agent.status === CANONICAL_AGENT_STATUS.error)
+      agent.status === CANONICAL_AGENT_STATUS.error) &&
+    agent.updatedAt < observerStartedAt
   );
 }
 
@@ -196,12 +204,13 @@ function resolveAgentForChange(
   change: WatchLifecycleEvent<CanonicalAgentStatus>,
   currentById: Map<string, CanonicalAgentSnapshot>,
   previousById: Map<string, CanonicalAgentSnapshot>,
+  observerStartedAt: number,
 ): CanonicalAgentSnapshot | undefined {
   if (change.kind === WATCH_LIFECYCLE_KIND.heartbeat) {
     return undefined;
   }
   const agent = currentById.get(change.agentId) ?? previousById.get(change.agentId);
-  if (!agent || isStaleJoinEvent(change, agent)) {
+  if (!agent || isStaleJoinEvent(change, agent, observerStartedAt)) {
     return undefined;
   }
   return agent;

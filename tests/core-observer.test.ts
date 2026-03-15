@@ -3,8 +3,43 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createObserver, PROVIDER_KINDS, type TranscriptProvider } from "@/core";
+import type { CanonicalAgentSnapshot } from "@/core/model";
 import type { ObserverChangeEvent } from "@/core/observer";
 import { cursor } from "@/providers/cursor";
+
+const AGENT_DEFAULTS: CanonicalAgentSnapshot = {
+  id: "agent-1",
+  name: "Agent",
+  kind: "local",
+  isSubagent: false,
+  status: "running",
+  taskSummary: "Test task",
+  updatedAt: Date.now(),
+  source: "mock",
+};
+
+function makeAgent(overrides: Partial<CanonicalAgentSnapshot> = {}): CanonicalAgentSnapshot {
+  return { ...AGENT_DEFAULTS, ...overrides };
+}
+
+function makeProvider(agentsFn: () => CanonicalAgentSnapshot[]): TranscriptProvider {
+  return {
+    id: PROVIDER_KINDS.cursor,
+    discover: () => ({
+      inputs: [{ uri: "/tmp/transcript.jsonl", kind: "file" }],
+      watchPaths: ["/tmp"],
+      warnings: [],
+    }),
+    read: () => ({
+      records: [],
+      health: { connected: true, sourceLabel: "mock", warnings: [] },
+    }),
+    normalize: () => ({
+      agents: agentsFn(),
+      health: { connected: true, sourceLabel: "mock", warnings: [] },
+    }),
+  };
+}
 
 describe("createObserver", () => {
   const cleanupPaths: string[] = [];
@@ -66,6 +101,56 @@ describe("createObserver", () => {
     expect(snapshot.agents[0].status).toBe("idle");
     expect(changes.some((e) => e.change.kind === "joined")).toBe(true);
     expect(changes.some((e) => e.change.kind === "statusChanged")).toBe(true);
+  });
+
+  it("filters completed agents that finished before observer started", async () => {
+    const observerStart = 10_000;
+    const provider = makeProvider(() => [
+      makeAgent({ status: "completed", updatedAt: observerStart - 5000 }),
+    ]);
+
+    const observer = createObserver({
+      provider,
+      workspacePaths: ["/tmp/workspace"],
+      now: () => observerStart,
+    });
+
+    const changes: ObserverChangeEvent[] = [];
+    observer.subscribe((event) => changes.push(event));
+
+    await observer.start();
+    await observer.stop();
+
+    expect(changes.filter((e) => e.change.kind === "joined")).toHaveLength(0);
+  });
+
+  it("emits completed agents that finished after observer started", async () => {
+    const observerStart = 10_000;
+    let readCount = 0;
+    const provider = makeProvider(() => {
+      readCount++;
+      if (readCount === 1) {
+        return [];
+      }
+      return [makeAgent({ status: "completed", updatedAt: observerStart + 1000 })];
+    });
+
+    const observer = createObserver({
+      provider,
+      workspacePaths: ["/tmp/workspace"],
+      now: () => observerStart,
+    });
+
+    const changes: ObserverChangeEvent[] = [];
+    observer.subscribe((event) => changes.push(event));
+
+    await observer.start();
+    await observer.refreshNow();
+    await observer.stop();
+
+    const joins = changes.filter((e) => e.change.kind === "joined");
+    expect(joins).toHaveLength(1);
+    expect(joins[0].agent.status).toBe("completed");
   });
 
   it("works with injected Cursor transcript provider", async () => {
