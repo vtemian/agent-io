@@ -1,0 +1,19 @@
+{
+  "pipelines": [
+    {
+      "name": "test-after-refactor",
+      "trigger": { "status": "completed", "source": "cursor-transcripts" },
+      "action": { "command": "npm test", "cwd": "/path/to/project" }
+    },
+    {
+      "name": "notify-on-error",
+      "trigger": { "status": "error" },
+      "action": { "command": "say 'Agent session failed'" }
+    },
+    {
+      "name": "lint-on-complete",
+      "trigger": { "status": "completed", "taskSummary": "refactor|lint|format" },
+      "action": { "command": "npm run lint" }
+    }
+  ]
+}

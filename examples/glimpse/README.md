@@ -17,15 +17,27 @@ npm install
 
 ## Run
 
+### agent-monitor (pinned overlay)
+
 ```bash
 npx tsx agent-monitor.ts [workspace-path]
 ```
 
-If no workspace path is provided, it defaults to the current working directory.
+Opens a transparent window pinned to the top-left corner of your screen (position 20, 100).
+
+### floating-monitor (click-through HUD)
+
+```bash
+npx tsx floating-monitor.ts [workspace-path]
+```
+
+A more compact, click-through variant. The window floats above all apps and passes clicks through to whatever is underneath, so it never interferes with your workflow. Slightly smaller dimensions and tighter spacing compared to the pinned monitor.
+
+If no workspace path is provided, both monitors default to the current working directory.
 
 ## What it does
 
-Opens a small transparent window pinned to the top-left corner of your screen. It displays every active coding agent (Cursor, Claude Code, Codex, OpenCode) detected in the given workspace, with:
+Both monitors display every active coding agent (Cursor, Claude Code, Codex, OpenCode) detected in the given workspace, with:
 
 - A colored status dot (green = running, yellow = idle, gray = completed, red = error)
 - The agent's source label
@@ -33,3 +45,7 @@ Opens a small transparent window pinned to the top-left corner of your screen. I
 - A relative timestamp ("3s ago", "2m ago")
 
 The window auto-updates every second and fades agents in/out as they join or leave.
+
+## Demo
+
+<!-- TODO: Add demo video -->

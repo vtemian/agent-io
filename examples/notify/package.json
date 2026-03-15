@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "node-notifier": "^10.0.1"
+  }
+}
