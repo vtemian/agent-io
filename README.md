@@ -6,6 +6,12 @@
 
 **A TypeScript library that turns AI coding agent transcripts into normalized, real-time event streams.**
 
+
+
+
+https://github.com/user-attachments/assets/417364e3-8bfb-4afa-a309-241405f0c2a4
+
+
 Unlike traditional observability tools (AgentOps, LangSmith) that require active instrumentation of your LLM calls, AgentProbe uses **Passive Observability**. It parses the artifacts (transcripts, logs) that tools like Cursor and Claude Code already leave behind, giving you real-time visibility into proprietary agents you don't own.
 
 ---
