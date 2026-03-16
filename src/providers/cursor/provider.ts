@@ -1,11 +1,11 @@
-import {
-  type CanonicalSnapshot,
-  type DiscoveryInput,
-  type DiscoveryResult,
-  PROVIDER_KINDS,
-  type TranscriptProvider,
-  type TranscriptReadResult,
+import type {
+  CanonicalSnapshot,
+  DiscoveryInput,
+  DiscoveryResult,
+  TranscriptProvider,
+  TranscriptReadResult,
 } from "@/core";
+import { PROVIDER_KINDS } from "@/core";
 import { arraysEqual, normalizeFromPayload } from "@/providers/shared/providers";
 import { CURSOR_SOURCE_KIND } from "./constants";
 import {
@@ -21,95 +21,122 @@ export interface CursorOptions {
   watch?: CursorWatchOptions | false;
 }
 
+interface CursorProviderState {
+  source: CursorTranscriptSource | undefined;
+  sourcePathKey: string;
+  connected: boolean;
+  cachedDiscovery: DiscoveryResult | undefined;
+  cachedFileList: string[] | undefined;
+  cachedWorkspacePaths: string[] | undefined;
+}
+
 export function cursor(options: CursorOptions = {}): TranscriptProvider {
   const sourceLabel = options.sourceLabel ?? CURSOR_SOURCE_KIND;
   const watch = options.watch === false ? undefined : createCursorWatch(options.watch);
-  let source: CursorTranscriptSource | undefined;
-  let sourcePathKey = "";
-  let connected = false;
-  let cachedDiscovery: DiscoveryResult | undefined;
-  let cachedFileList: string[] | undefined;
-  let cachedWorkspacePaths: string[] | undefined;
-
-  function discover(workspacePaths: string[]): DiscoveryResult {
-    const currentFileList = listTranscriptFileNames({ workspacePaths });
-    if (
-      cachedDiscovery &&
-      cachedFileList &&
-      cachedWorkspacePaths &&
-      arraysEqual(currentFileList, cachedFileList) &&
-      arraysEqual(workspacePaths, cachedWorkspacePaths)
-    ) {
-      return cachedDiscovery;
-    }
-
-    const watchPaths = resolveTranscriptDirectories({ workspacePaths });
-    const sourcePaths = resolveTranscriptSourcePaths({ workspacePaths });
-    const inputs: DiscoveryInput[] = sourcePaths.map((sourcePath) => ({
-      uri: sourcePath,
-      kind: "file",
-      metadata: { providerId: PROVIDER_KINDS.cursor },
-    }));
-    cachedDiscovery = { inputs, watchPaths, warnings: [] };
-    cachedFileList = currentFileList;
-    cachedWorkspacePaths = [...workspacePaths];
-    return cachedDiscovery;
-  }
-
-  function connect(): void {
-    connected = true;
-    void source?.connect();
-  }
-
-  function disconnect(): void {
-    connected = false;
-    void source?.disconnect();
-    cachedDiscovery = undefined;
-    cachedFileList = undefined;
-    cachedWorkspacePaths = undefined;
-  }
-
-  async function read(
-    inputs: DiscoveryInput[],
-    now: number = Date.now(),
-  ): Promise<TranscriptReadResult> {
-    const sourcePaths = inputs.map((input) => input.uri);
-    const nextSourcePathKey = sourcePaths.join("\n");
-    source = ensureSource(source, sourcePaths, sourceLabel, sourcePathKey, nextSourcePathKey);
-    sourcePathKey = nextSourcePathKey;
-    if (connected) {
-      void source.connect();
-    }
-    const snapshot = await source.readSnapshot(now);
-    return {
-      records: [
-        {
-          provider: PROVIDER_KINDS.cursor,
-          inputUri: "cursor://transcripts",
-          observedAt: now,
-          payload: snapshot,
-        },
-      ],
-      health: {
-        connected: snapshot.connected,
-        sourceLabel: snapshot.sourceLabel,
-        warnings: snapshot.warnings,
-      },
-    };
-  }
-
-  function normalize(readResult: TranscriptReadResult, _now: number): CanonicalSnapshot {
-    return normalizeFromPayload(readResult);
-  }
+  const state: CursorProviderState = {
+    source: undefined,
+    sourcePathKey: "",
+    connected: false,
+    cachedDiscovery: undefined,
+    cachedFileList: undefined,
+    cachedWorkspacePaths: undefined,
+  };
 
   return {
     id: PROVIDER_KINDS.cursor,
-    discover,
-    connect,
-    disconnect,
-    read,
-    normalize,
+    discover: (workspacePaths: string[]) => discoverTranscripts(state, workspacePaths),
+    connect: () => connectProvider(state),
+    disconnect: () => disconnectProvider(state),
+    read: (inputs: DiscoveryInput[], now: number = Date.now()) =>
+      readTranscripts(state, sourceLabel, inputs, now),
+    normalize: (readResult: TranscriptReadResult, _now: number): CanonicalSnapshot =>
+      normalizeFromPayload(readResult),
     watch,
+  };
+}
+
+function discoverTranscripts(
+  state: CursorProviderState,
+  workspacePaths: string[],
+): DiscoveryResult {
+  const currentFileList = listTranscriptFileNames({ workspacePaths });
+  if (
+    state.cachedDiscovery &&
+    state.cachedFileList &&
+    state.cachedWorkspacePaths &&
+    arraysEqual(currentFileList, state.cachedFileList) &&
+    arraysEqual(workspacePaths, state.cachedWorkspacePaths)
+  ) {
+    return state.cachedDiscovery;
+  }
+
+  const watchPaths = resolveTranscriptDirectories({ workspacePaths });
+  const sourcePaths = resolveTranscriptSourcePaths({ workspacePaths });
+  const inputs: DiscoveryInput[] = sourcePaths.map((sourcePath) => ({
+    uri: sourcePath,
+    kind: "file",
+    metadata: { providerId: PROVIDER_KINDS.cursor },
+  }));
+  state.cachedDiscovery = { inputs, watchPaths, warnings: [] };
+  state.cachedFileList = currentFileList;
+  state.cachedWorkspacePaths = [...workspacePaths];
+  return state.cachedDiscovery;
+}
+
+function connectProvider(state: CursorProviderState): void {
+  state.connected = true;
+  void state.source?.connect();
+}
+
+function disconnectProvider(state: CursorProviderState): void {
+  state.connected = false;
+  void state.source?.disconnect();
+  state.cachedDiscovery = undefined;
+  state.cachedFileList = undefined;
+  state.cachedWorkspacePaths = undefined;
+}
+
+async function readTranscripts(
+  state: CursorProviderState,
+  sourceLabel: string,
+  inputs: DiscoveryInput[],
+  now: number,
+): Promise<TranscriptReadResult> {
+  const sourcePaths = inputs.map((input) => input.uri);
+  const nextSourcePathKey = sourcePaths.join("\n");
+  state.source = ensureSource(
+    state.source,
+    sourcePaths,
+    sourceLabel,
+    state.sourcePathKey,
+    nextSourcePathKey,
+  );
+  state.sourcePathKey = nextSourcePathKey;
+  if (state.connected) {
+    void state.source.connect();
+  }
+  const snapshot = await state.source.readSnapshot(now);
+  return buildReadResult(snapshot, now);
+}
+
+function buildReadResult(
+  snapshot: { connected: boolean; sourceLabel: string; warnings: string[] },
+  now: number,
+): TranscriptReadResult {
+  return {
+    records: [
+      {
+        provider: PROVIDER_KINDS.cursor,
+        inputUri: "cursor://transcripts",
+        observedAt: now,
+        payload: snapshot,
+      },
+    ],
+    health: {
+      connected: snapshot.connected,
+      sourceLabel: snapshot.sourceLabel,
+      warnings: snapshot.warnings,
+    },
   };
 }
 

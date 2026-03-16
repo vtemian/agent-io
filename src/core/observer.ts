@@ -11,7 +11,7 @@ import type {
 } from "./providers";
 import { createWatchRuntime } from "./runtime/index";
 import { emitToListeners } from "./runtime/shared";
-import type { WatchHealth, WatchLifecycleEvent } from "./types";
+import type { WatchHealth, WatchLifecycleEvent, WatchRuntime } from "./types";
 import { WATCH_LIFECYCLE_KIND, WATCH_RUNTIME_EVENT_TYPES, type WatchSource } from "./types";
 
 export interface ObserverSnapshot {
@@ -41,122 +41,156 @@ export interface Observer {
   subscribe(listener: (event: ObserverChangeEvent) => void): () => void;
 }
 
-export function createObserver(options: ObserverOptions): Observer {
-  const now = options.now ?? (() => Date.now());
-  const listeners = new Set<(event: ObserverChangeEvent) => void>();
-  const workspacePaths = options.workspacePaths
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
+interface ObserverState {
+  latestSnapshot: ObserverSnapshot | undefined;
+  previousSnapshot: ObserverSnapshot | undefined;
+  discovery: DiscoveryResult | undefined;
+  startedAt: number;
+}
 
-  let latestSnapshot: ObserverSnapshot | undefined;
-  let previousSnapshot: ObserverSnapshot | undefined;
-  let discovery: DiscoveryResult | undefined;
-  let startedAt = 0;
-
-  const source: WatchSource<CanonicalAgentSnapshot> = {
+function buildSource(
+  options: ObserverOptions,
+  state: ObserverState,
+  now: () => number,
+): WatchSource<CanonicalAgentSnapshot> {
+  return {
     connect: async () => {
-      startedAt = now();
-      discovery = await options.provider.discover(workspacePaths);
+      state.startedAt = now();
+      state.discovery = await options.provider.discover(options.workspacePaths);
       await options.provider.connect?.();
     },
     disconnect: () => options.provider.disconnect?.(),
     readSnapshot: async (at?: number) => {
       const observedAt = at ?? now();
-      const resolved = await options.provider.discover(workspacePaths);
-      discovery = resolved;
+      const resolved = await options.provider.discover(options.workspacePaths);
+      state.discovery = resolved;
       const readResult = await options.provider.read(resolved.inputs, observedAt);
       const normalized = await options.provider.normalize(readResult, observedAt);
       return mergeSnapshotWarnings(normalized, readResult, resolved);
     },
-    getWatchPaths: () => discovery?.watchPaths ?? [],
+    getWatchPaths: () => state.discovery?.watchPaths ?? [],
   };
+}
+
+function handleSnapshotEvent(
+  state: ObserverState,
+  event: {
+    at: number;
+    snapshot: { agents: CanonicalAgentSnapshot[]; health: WatchHealth };
+  },
+): void {
+  state.previousSnapshot = state.latestSnapshot;
+  state.latestSnapshot = {
+    at: event.at,
+    agents: event.snapshot.agents,
+    health: event.snapshot.health,
+  };
+}
+
+function handleLifecycleEvents(
+  state: ObserverState,
+  events: WatchLifecycleEvent<CanonicalAgentStatus>[],
+  listeners: Set<(event: ObserverChangeEvent) => void>,
+): void {
+  if (!state.latestSnapshot) {
+    return;
+  }
+  const currentById = indexAgentsById(state.latestSnapshot.agents);
+  const previousById = indexAgentsById(state.previousSnapshot?.agents ?? []);
+  for (const change of events) {
+    const agent = resolveAgentForChange(change, currentById, previousById, state.startedAt);
+    if (agent) {
+      emitToListeners(listeners, { change, agent, snapshot: state.latestSnapshot });
+    }
+  }
+}
+
+function resetState(state: ObserverState): void {
+  state.latestSnapshot = undefined;
+  state.previousSnapshot = undefined;
+  state.discovery = undefined;
+  state.startedAt = 0;
+}
+
+function cleanWorkspacePaths(paths: string[]): string[] {
+  return paths.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+}
+
+function initRuntime(
+  options: ObserverOptions,
+  source: WatchSource<CanonicalAgentSnapshot>,
+  now: () => number,
+): WatchRuntime<CanonicalAgentSnapshot, CanonicalAgentStatus> {
   const providerWatch = options.provider.watch;
 
-  const runtime = createWatchRuntime<CanonicalAgentSnapshot, CanonicalAgentStatus>({
+  return createWatchRuntime<CanonicalAgentSnapshot, CanonicalAgentStatus>({
     source,
     lifecycle: {
       getId: (agent) => agent.id,
       getStatus: (agent) => agent.status,
     },
-    debounceMs: options.debounceMs ?? options.provider.watch?.debounceMs,
+    debounceMs: options.debounceMs ?? providerWatch?.debounceMs,
     checkIdleDelayMs: options.checkIdleDelayMs,
     now,
     subscribeToChanges: providerWatch
       ? (watchPath, onEvent, onError) => providerWatch.subscribe(watchPath, onEvent, onError)
       : undefined,
   });
+}
 
-  function handleSnapshotEvent(event: {
-    at: number;
-    snapshot: { agents: CanonicalAgentSnapshot[]; health: WatchHealth };
-  }): void {
-    previousSnapshot = latestSnapshot;
-    latestSnapshot = {
-      at: event.at,
-      agents: event.snapshot.agents,
-      health: event.snapshot.health,
-    };
-  }
-
-  function handleLifecycleEvents(events: WatchLifecycleEvent<CanonicalAgentStatus>[]): void {
-    if (!latestSnapshot) {
-      return;
-    }
-    const currentById = indexAgentsById(latestSnapshot.agents);
-    const previousById = indexAgentsById(previousSnapshot?.agents ?? []);
-    for (const change of events) {
-      const agent = resolveAgentForChange(change, currentById, previousById, startedAt);
-      if (agent) {
-        emit({ change, agent, snapshot: latestSnapshot });
-      }
-    }
-  }
-
+function wireRuntimeEvents(
+  runtime: WatchRuntime<CanonicalAgentSnapshot, CanonicalAgentStatus>,
+  state: ObserverState,
+  listeners: Set<(event: ObserverChangeEvent) => void>,
+): void {
   runtime.subscribe((event) => {
     if (event.type === WATCH_RUNTIME_EVENT_TYPES.snapshot) {
-      handleSnapshotEvent(event);
+      handleSnapshotEvent(state, event);
       return;
     }
 
     if (event.type === WATCH_RUNTIME_EVENT_TYPES.lifecycle) {
-      handleLifecycleEvents(event.events);
+      handleLifecycleEvents(state, event.events, listeners);
       return;
     }
   });
+}
 
-  function subscribe(listener: (event: ObserverChangeEvent) => void): () => void {
-    listeners.add(listener);
-    return () => listeners.delete(listener);
-  }
+export function createObserver(options: ObserverOptions): Observer {
+  const now = options.now ?? (() => Date.now());
+  const listeners = new Set<(event: ObserverChangeEvent) => void>();
+  const resolvedOptions = {
+    ...options,
+    workspacePaths: cleanWorkspacePaths(options.workspacePaths),
+  };
 
-  async function refreshNow(): Promise<ObserverSnapshot> {
-    const snapshot = await runtime.refreshNow();
-    const at = latestSnapshot?.at ?? now();
-    return {
-      at,
-      agents: snapshot.agents,
-      health: snapshot.health,
-    };
-  }
+  const state: ObserverState = {
+    latestSnapshot: undefined,
+    previousSnapshot: undefined,
+    discovery: undefined,
+    startedAt: 0,
+  };
 
-  function emit(event: ObserverChangeEvent): void {
-    emitToListeners(listeners, event);
-  }
-
-  async function stop(): Promise<void> {
-    await runtime.stop();
-    listeners.clear();
-    latestSnapshot = undefined;
-    previousSnapshot = undefined;
-    discovery = undefined;
-    startedAt = 0;
-  }
+  const source = buildSource(resolvedOptions, state, now);
+  const runtime = initRuntime(options, source, now);
+  wireRuntimeEvents(runtime, state, listeners);
 
   return {
     start: () => runtime.start(),
-    stop,
-    refreshNow,
-    subscribe,
+    stop: async () => {
+      await runtime.stop();
+      listeners.clear();
+      resetState(state);
+    },
+    refreshNow: async () => {
+      const snapshot = await runtime.refreshNow();
+      const at = state.latestSnapshot?.at ?? now();
+      return { at, agents: snapshot.agents, health: snapshot.health };
+    },
+    subscribe(listener: (event: ObserverChangeEvent) => void): () => void {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
   };
 }
 

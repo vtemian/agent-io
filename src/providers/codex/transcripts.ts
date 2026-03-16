@@ -75,79 +75,101 @@ interface ParseStrategy {
   startLine: number;
 }
 
+interface SourceState {
+  connected: boolean;
+  readonly sourcePaths: string[];
+  readonly sourceLabel: string;
+  readonly fileCache: Map<string, SessionFileCache>;
+}
+
 export function createCodexTranscriptSource(
   options: CodexTranscriptSourceOptions,
 ): CodexTranscriptSource {
-  const sourcePaths = Array.isArray(options.sourcePaths) ? [...options.sourcePaths] : [];
-  const sourceLabel = options.sourceLabel ?? CODEX_SOURCE_KIND;
-  let connected = false;
-  const fileCache = new Map<string, SessionFileCache>();
-
-  function connect(): void {
-    connected = true;
-  }
-
-  function disconnect(): void {
-    connected = false;
-    fileCache.clear();
-  }
-
-  async function readSnapshot(now: number = Date.now()): Promise<CodexTranscriptSourceResult> {
-    if (!connected) {
-      return {
-        agents: [],
-        connected: false,
-        sourceLabel,
-        warnings: ["Codex transcript source is disconnected."],
-      };
-    }
-
-    if (sourcePaths.length === 0) {
-      return {
-        agents: [],
-        connected: false,
-        sourceLabel,
-        warnings: ["No session paths configured."],
-      };
-    }
-
-    const orderedIds: string[] = [];
-    const latestById = new Map<string, CanonicalAgentSnapshot>();
-    const allWarnings: string[] = [];
-    let hasReadError = false;
-    let successfulReads = 0;
-
-    for (const sourcePath of sourcePaths) {
-      const result = await processSourceFile(sourcePath, now, fileCache);
-      allWarnings.push(...result.warnings);
-      if (result.success) {
-        successfulReads += 1;
-      } else {
-        hasReadError = true;
-      }
-      mergeAgents(result.agents, orderedIds, latestById);
-    }
-
-    pruneStaleCache(fileCache, sourcePaths);
-
-    const agents = orderedIds
-      .map((id) => latestById.get(id))
-      .filter((agent): agent is CanonicalAgentSnapshot => agent !== undefined);
-
-    return {
-      agents,
-      connected: successfulReads > 0 || !hasReadError,
-      sourceLabel,
-      warnings: allWarnings,
-    };
-  }
+  const state: SourceState = {
+    connected: false,
+    sourcePaths: Array.isArray(options.sourcePaths) ? [...options.sourcePaths] : [],
+    sourceLabel: options.sourceLabel ?? CODEX_SOURCE_KIND,
+    fileCache: new Map(),
+  };
 
   return {
     sourceKind: CODEX_SOURCE_KIND,
-    connect,
-    disconnect,
-    readSnapshot,
+    connect: () => {
+      state.connected = true;
+    },
+    disconnect: () => {
+      state.connected = false;
+      state.fileCache.clear();
+    },
+    readSnapshot: (now = Date.now()) => readSnapshot(state, now),
   };
+}
+
+async function readSnapshot(state: SourceState, now: number): Promise<CodexTranscriptSourceResult> {
+  if (!state.connected) {
+    return {
+      agents: [],
+      connected: false,
+      sourceLabel: state.sourceLabel,
+      warnings: ["Codex transcript source is disconnected."],
+    };
+  }
+  if (state.sourcePaths.length === 0) {
+    return {
+      agents: [],
+      connected: false,
+      sourceLabel: state.sourceLabel,
+      warnings: ["No session paths configured."],
+    };
+  }
+
+  const { agents, hasReadError, successfulReads, warnings } = await collectSourceResults(
+    state.sourcePaths,
+    now,
+    state.fileCache,
+  );
+  return {
+    agents,
+    connected: successfulReads > 0 || !hasReadError,
+    sourceLabel: state.sourceLabel,
+    warnings,
+  };
+}
+
+async function collectSourceResults(
+  sourcePaths: readonly string[],
+  now: number,
+  fileCache: Map<string, SessionFileCache>,
+): Promise<{
+  agents: CanonicalAgentSnapshot[];
+  hasReadError: boolean;
+  successfulReads: number;
+  warnings: string[];
+}> {
+  const orderedIds: string[] = [];
+  const latestById = new Map<string, CanonicalAgentSnapshot>();
+  const allWarnings: string[] = [];
+  let hasReadError = false;
+  let successfulReads = 0;
+
+  for (const sourcePath of sourcePaths) {
+    const result = await processSourceFile(sourcePath, now, fileCache);
+    allWarnings.push(...result.warnings);
+    if (result.success) {
+      successfulReads += 1;
+    } else {
+      hasReadError = true;
+    }
+    mergeAgents(result.agents, orderedIds, latestById);
+  }
+
+  pruneStaleCache(fileCache, sourcePaths);
+
+  const agents = orderedIds
+    .map((id) => latestById.get(id))
+    .filter((agent): agent is CanonicalAgentSnapshot => agent !== undefined);
+
+  return { agents, hasReadError, successfulReads, warnings: allWarnings };
 }
 
 function resolveParseStrategy(
@@ -166,17 +188,11 @@ async function processSourceFile(
   now: number,
   fileCache: Map<string, SessionFileCache>,
 ): Promise<ProcessFileResult> {
-  const warnings: string[] = [];
   const { fileUpdatedAt, fileSizeBytes } = await statSourceFile(sourcePath, now);
-
   const cached = fileCache.get(sourcePath);
 
   if (cached && cached.mtimeMs === fileUpdatedAt && cached.sizeBytes === fileSizeBytes) {
-    return {
-      agents: resolveAgentsFromState(cached.state, cached.fileUpdatedAt, now),
-      success: true,
-      warnings,
-    };
+    return cachedResult(cached.state, cached.fileUpdatedAt, now);
   }
 
   const contentChanged = !cached || fileSizeBytes !== cached.sizeBytes;
@@ -184,22 +200,41 @@ async function processSourceFile(
 
   if (cached && !contentChanged) {
     fileCache.set(sourcePath, { ...cached, mtimeMs: fileUpdatedAt });
-    return {
-      agents: resolveAgentsFromState(cached.state, effectiveUpdatedAt, now),
-      success: true,
-      warnings,
-    };
+    return cachedResult(cached.state, effectiveUpdatedAt, now);
   }
 
+  return parseAndCacheFile(
+    sourcePath,
+    fileCache,
+    cached,
+    fileSizeBytes,
+    fileUpdatedAt,
+    effectiveUpdatedAt,
+    now,
+  );
+}
+
+function cachedResult(state: SessionParseState, updatedAt: number, now: number): ProcessFileResult {
+  return { agents: resolveAgentsFromState(state, updatedAt, now), success: true, warnings: [] };
+}
+
+async function parseAndCacheFile(
+  sourcePath: string,
+  fileCache: Map<string, SessionFileCache>,
+  cached: SessionFileCache | undefined,
+  fileSizeBytes: number,
+  fileUpdatedAt: number,
+  effectiveUpdatedAt: number,
+  now: number,
+): Promise<ProcessFileResult> {
   const contents = await readSourceFile(sourcePath);
   if (contents === null) {
-    warnings.push(`Failed to read session path: ${sourcePath}`);
-    return { agents: [], success: false, warnings };
+    return { agents: [], success: false, warnings: [`Failed to read session path: ${sourcePath}`] };
   }
 
+  const warnings: string[] = [];
   const lines = contents.split(/\r?\n/);
   const { state, startLine } = resolveParseStrategy(cached, fileSizeBytes, lines.length);
-
   accumulateLines(state, lines, startLine, sourcePath, warnings);
 
   fileCache.set(sourcePath, {
@@ -308,24 +343,17 @@ function accumulateSessionMeta(state: SessionParseState, record: SessionMeta): v
 function accumulateResponseItem(state: SessionParseState, record: ResponseItem): void {
   const { payload } = record;
 
-  if (payload.type === "message") {
-    if (payload.role === "user") {
-      state.messageCount += 1;
-      state.latestRecordType = "user";
-      const extracted = extractUserText(payload.content);
-      if (extracted) {
-        state.latestUserContent = extracted;
-      }
-      return;
-    }
-    if (payload.role === "assistant") {
-      state.messageCount += 1;
-      state.latestRecordType = "assistant";
-      return;
-    }
+  if (payload.type === "message" && payload.role === "user") {
+    state.messageCount += 1;
+    state.latestRecordType = "user";
+    state.latestUserContent = extractUserText(payload.content) ?? state.latestUserContent;
     return;
   }
-
+  if (payload.type === "message" && payload.role === "assistant") {
+    state.messageCount += 1;
+    state.latestRecordType = "assistant";
+    return;
+  }
   if (payload.type === "function_call" || payload.type === "custom_tool_call") {
     state.toolCallCount += 1;
     state.latestRecordType = payload.type;

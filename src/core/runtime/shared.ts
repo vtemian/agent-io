@@ -19,12 +19,12 @@ export const WATCH_RUNTIME_INTERNAL_STATES = {
 export type RuntimeStatus =
   (typeof WATCH_RUNTIME_INTERNAL_STATES)[keyof typeof WATCH_RUNTIME_INTERNAL_STATES];
 
-export type RefreshWaiter<TAgent> = {
+export interface RefreshWaiter<TAgent> {
   resolve: (snapshot: WatchSnapshot<TAgent>) => void;
   reject: (error: unknown) => void;
-};
+}
 
-export type RuntimeState<TAgent> = {
+export interface RuntimeState<TAgent> {
   state: RuntimeStatus;
   desiredRunning: boolean;
   lifecycleToken: number;
@@ -32,7 +32,7 @@ export type RuntimeState<TAgent> = {
   activeCycleWaiters: RefreshWaiter<TAgent>[];
   startPromise: Promise<void> | null;
   stopPromise: Promise<void> | null;
-};
+}
 
 export function resolveWaiters<TAgent>(
   waiters: RefreshWaiter<TAgent>[],

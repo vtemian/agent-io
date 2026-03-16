@@ -55,19 +55,28 @@ export function collectJsonlFiles(
 
   for (const directory of directories) {
     const entries = readDirectoryEntries(directory, options.recursive);
-    for (const relative of entries) {
-      if (!relative.endsWith(extension)) {
-        continue;
-      }
-      const absolute = path.join(directory, relative);
-      const stats = tryStatSync(absolute);
-      if (stats?.isFile()) {
-        collected.push({ path: absolute, mtimeMs: Math.round(stats.mtimeMs) });
-      }
-    }
+    collectMatchingEntries(collected, directory, entries, extension);
   }
 
   return collected;
+}
+
+function collectMatchingEntries(
+  out: DiscoveredFile[],
+  directory: string,
+  entries: string[],
+  extension: string,
+): void {
+  for (const relative of entries) {
+    if (!relative.endsWith(extension)) {
+      continue;
+    }
+    const absolute = path.join(directory, relative);
+    const stats = tryStatSync(absolute);
+    if (stats?.isFile()) {
+      out.push({ path: absolute, mtimeMs: Math.round(stats.mtimeMs) });
+    }
+  }
 }
 
 function readDirectoryEntries(directory: string, recursive: boolean): string[] {

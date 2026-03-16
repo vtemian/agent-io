@@ -20,52 +20,59 @@ export interface EventBus<TEvent extends { type: string }> {
   clear(): void;
 }
 
+interface BusState<TEvent> {
+  readonly queue: TEvent[];
+  processing: boolean;
+}
+
+async function processQueue<TEvent extends { type: string }>(
+  state: BusState<TEvent>,
+  options: EventBusOptions<TEvent>,
+): Promise<void> {
+  if (state.processing) {
+    return;
+  }
+  state.processing = true;
+
+  while (state.queue.length > 0) {
+    const event = state.queue.shift();
+    if (event === undefined) {
+      continue;
+    }
+    const handler = options.handlers[event.type];
+    if (!handler) {
+      continue;
+    }
+
+    try {
+      await handler(event);
+    } catch (error) {
+      // Handler errors must not crash the bus — a failing handler would block all
+      // subsequent events in the queue, causing the runtime to silently stop responding.
+      options.onHandlerError?.(toError(error));
+    }
+  }
+
+  state.processing = false;
+}
+
 export function createEventBus<TEvent extends { type: string }>(
   options: EventBusOptions<TEvent>,
 ): EventBus<TEvent> {
-  const { handlers, getToken } = options;
-  const queue: TEvent[] = [];
-  let isProcessing = false;
-
-  async function processQueue(): Promise<void> {
-    if (isProcessing) {
-      return;
-    }
-    isProcessing = true;
-
-    while (queue.length > 0) {
-      const event = queue.shift();
-      if (event === undefined) {
-        continue;
-      }
-      const handler = handlers[event.type];
-      if (!handler) {
-        continue;
-      }
-
-      try {
-        await handler(event);
-      } catch (error) {
-        // Handler errors must not crash the bus — a failing handler would block all
-        // subsequent events in the queue, causing the runtime to silently stop responding.
-        options.onHandlerError?.(toError(error));
-      }
-    }
-
-    isProcessing = false;
-  }
+  const { getToken } = options;
+  const state: BusState<TEvent> = { queue: [], processing: false };
 
   return {
     dispatch(event: TEvent, token: number): void {
       if (token !== getToken()) {
         return;
       }
-      queue.push(event);
-      void processQueue();
+      state.queue.push(event);
+      void processQueue(state, options);
     },
 
     clear(): void {
-      queue.length = 0;
+      state.queue.length = 0;
     },
   };
 }

@@ -1,6 +1,5 @@
 import betterSqlite3 from "better-sqlite3";
 import {
-  type CanonicalSnapshot,
   type DiscoveryInput,
   type DiscoveryResult,
   PROVIDER_KINDS,
@@ -35,152 +34,155 @@ export interface OpenCodeOptions {
   _testDb?: betterSqlite3.Database;
 }
 
+interface ProviderState {
+  db: betterSqlite3.Database | undefined;
+  ocDb: OpenCodeDatabase | undefined;
+  cachedProjectIds: string[] | undefined;
+  cachedWorkspaceKey: string | undefined;
+}
+
 export function openCode(options: OpenCodeOptions = {}): TranscriptProvider {
   const sourceLabel = options.sourceLabel ?? OPENCODE_SOURCE_KIND;
   const sessionWindowMs = options.sessionWindowMs ?? OPENCODE_SESSION_WINDOW_MS;
-  let db: betterSqlite3.Database | undefined = options._testDb;
-  let ocDb: OpenCodeDatabase | undefined = db ? createOpenCodeDatabase(db) : undefined;
-  let cachedProjectIds: string[] | undefined;
-  let cachedWorkspaceKey: string | undefined;
-
-  function openDb(): void {
-    if (db && ocDb) {
-      return;
-    }
-    if (db) {
-      ocDb = createOpenCodeDatabase(db);
-      return;
-    }
-    const dbPath = options.dbPath ?? OPENCODE_DB_PATH_DEFAULT;
-    try {
-      db = new betterSqlite3(dbPath, { readonly: true });
-      ocDb = createOpenCodeDatabase(db);
-    } catch {
-      db = undefined;
-      ocDb = undefined;
-    }
-  }
-
-  function closeDb(): void {
-    if (!options._testDb && db) {
-      db.close();
-    }
-    db = undefined;
-    ocDb = undefined;
-  }
+  const state: ProviderState = {
+    db: options._testDb,
+    ocDb: options._testDb ? createOpenCodeDatabase(options._testDb) : undefined,
+    cachedProjectIds: undefined,
+    cachedWorkspaceKey: undefined,
+  };
 
   const watch =
     options.watch === false || options._testDb
       ? undefined
       : createOpenCodeWatch({
           pollIntervalMs: options.watch?.pollIntervalMs,
-          getDataVersion: () => {
-            if (!ocDb) {
-              return 0;
-            }
-            return ocDb.getDataVersion();
-          },
+          getDataVersion: () => state.ocDb?.getDataVersion() ?? 0,
         });
-
-  function connect(): void {
-    openDb();
-  }
-
-  function disconnect(): void {
-    closeDb();
-    cachedProjectIds = undefined;
-    cachedWorkspaceKey = undefined;
-  }
-
-  function discover(workspacePaths: string[]): DiscoveryResult {
-    if (!ocDb) {
-      return { inputs: [], watchPaths: [], warnings: ["OpenCode database not found."] };
-    }
-
-    const workspaceKey = workspacePaths.join("\n");
-    if (cachedProjectIds && cachedWorkspaceKey === workspaceKey) {
-      return buildDiscoveryResult(cachedProjectIds);
-    }
-
-    cachedProjectIds = ocDb.findProjectIds(workspacePaths);
-    cachedWorkspaceKey = workspaceKey;
-    return buildDiscoveryResult(cachedProjectIds);
-  }
-
-  function buildDiscoveryResult(projectIds: string[]): DiscoveryResult {
-    if (projectIds.length === 0) {
-      return { inputs: [], watchPaths: [], warnings: [] };
-    }
-
-    const dbPath = options.dbPath ?? OPENCODE_DB_PATH_DEFAULT;
-    const inputs: DiscoveryInput[] = [
-      {
-        uri: `sqlite://${dbPath}`,
-        kind: "endpoint",
-        metadata: { providerId: PROVIDER_KINDS.openCode, projectIds },
-      },
-    ];
-    return { inputs, watchPaths: [dbPath], warnings: [] };
-  }
-
-  function read(inputs: DiscoveryInput[], now: number = Date.now()): TranscriptReadResult {
-    if (!ocDb || inputs.length === 0) {
-      return {
-        records: [],
-        health: { connected: false, sourceLabel, warnings: ["OpenCode database not available."] },
-      };
-    }
-
-    const raw = inputs[0].metadata?.projectIds;
-    const projectIds = Array.isArray(raw)
-      ? raw.filter((v): v is string => typeof v === "string")
-      : [];
-    const updatedAfter = now - sessionWindowMs;
-    const sessions = ocDb.findSessions(projectIds, updatedAfter);
-
-    if (sessions.length === 0) {
-      return {
-        records: [
-          {
-            provider: PROVIDER_KINDS.openCode,
-            inputUri: "opencode://sessions",
-            observedAt: now,
-            payload: { agents: [] },
-          },
-        ],
-        health: { connected: true, sourceLabel, warnings: [] },
-      };
-    }
-
-    const sessionIds = sessions.map((s) => s.id);
-    const stats = ocDb.getSessionStats(sessionIds);
-    const agents = buildAgentSnapshots(sessions, stats, ocDb, now);
-
-    return {
-      records: [
-        {
-          provider: PROVIDER_KINDS.openCode,
-          inputUri: "opencode://sessions",
-          observedAt: now,
-          payload: { agents },
-        },
-      ],
-      health: { connected: true, sourceLabel, warnings: [] },
-    };
-  }
-
-  function normalize(readResult: TranscriptReadResult, _now: number): CanonicalSnapshot {
-    return normalizeFromPayload(readResult);
-  }
 
   return {
     id: PROVIDER_KINDS.openCode,
-    discover,
-    connect,
-    disconnect,
-    read,
-    normalize,
+    connect: () => openDb(state, options),
+    disconnect: () => disconnectState(state, options),
+    discover: (workspacePaths) => discoverProjects(state, options, workspacePaths),
+    read: (inputs, now = Date.now()) =>
+      readSessions(state, inputs, now, sourceLabel, sessionWindowMs),
+    normalize: (readResult, _now) => normalizeFromPayload(readResult),
     watch,
+  };
+}
+
+function openDb(state: ProviderState, options: OpenCodeOptions): void {
+  if (state.db && state.ocDb) {
+    return;
+  }
+  if (state.db) {
+    state.ocDb = createOpenCodeDatabase(state.db);
+    return;
+  }
+  const dbPath = options.dbPath ?? OPENCODE_DB_PATH_DEFAULT;
+  try {
+    state.db = new betterSqlite3(dbPath, { readonly: true });
+    state.ocDb = createOpenCodeDatabase(state.db);
+  } catch {
+    state.db = undefined;
+    state.ocDb = undefined;
+  }
+}
+
+function disconnectState(state: ProviderState, options: OpenCodeOptions): void {
+  if (!options._testDb && state.db) {
+    state.db.close();
+  }
+  state.db = undefined;
+  state.ocDb = undefined;
+  state.cachedProjectIds = undefined;
+  state.cachedWorkspaceKey = undefined;
+}
+
+function discoverProjects(
+  state: ProviderState,
+  options: OpenCodeOptions,
+  workspacePaths: string[],
+): DiscoveryResult {
+  if (!state.ocDb) {
+    return { inputs: [], watchPaths: [], warnings: ["OpenCode database not found."] };
+  }
+
+  const workspaceKey = workspacePaths.join("\n");
+  if (state.cachedProjectIds && state.cachedWorkspaceKey === workspaceKey) {
+    return buildDiscoveryResult(state.cachedProjectIds, options);
+  }
+
+  state.cachedProjectIds = state.ocDb.findProjectIds(workspacePaths);
+  state.cachedWorkspaceKey = workspaceKey;
+  return buildDiscoveryResult(state.cachedProjectIds, options);
+}
+
+function buildDiscoveryResult(projectIds: string[], options: OpenCodeOptions): DiscoveryResult {
+  if (projectIds.length === 0) {
+    return { inputs: [], watchPaths: [], warnings: [] };
+  }
+
+  const dbPath = options.dbPath ?? OPENCODE_DB_PATH_DEFAULT;
+  const inputs: DiscoveryInput[] = [
+    {
+      uri: `sqlite://${dbPath}`,
+      kind: "endpoint",
+      metadata: { providerId: PROVIDER_KINDS.openCode, projectIds },
+    },
+  ];
+  return { inputs, watchPaths: [dbPath], warnings: [] };
+}
+
+function readSessions(
+  state: ProviderState,
+  inputs: DiscoveryInput[],
+  now: number,
+  sourceLabel: string,
+  sessionWindowMs: number,
+): TranscriptReadResult {
+  if (!state.ocDb || inputs.length === 0) {
+    return {
+      records: [],
+      health: { connected: false, sourceLabel, warnings: ["OpenCode database not available."] },
+    };
+  }
+
+  const projectIds = extractProjectIds(inputs[0]);
+  const sessions = state.ocDb.findSessions(projectIds, now - sessionWindowMs);
+  const agents =
+    sessions.length > 0
+      ? buildAgentSnapshots(
+          sessions,
+          state.ocDb.getSessionStats(sessions.map((s) => s.id)),
+          state.ocDb,
+          now,
+        )
+      : [];
+
+  return buildReadResult(agents, now, sourceLabel);
+}
+
+function extractProjectIds(input: DiscoveryInput): string[] {
+  const raw = input.metadata?.projectIds;
+  return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : [];
+}
+
+function buildReadResult(
+  agents: CanonicalAgentSnapshot[],
+  now: number,
+  sourceLabel: string,
+): TranscriptReadResult {
+  return {
+    records: [
+      {
+        provider: PROVIDER_KINDS.openCode,
+        inputUri: "opencode://sessions",
+        observedAt: now,
+        payload: { agents },
+      },
+    ],
+    health: { connected: true, sourceLabel, warnings: [] },
   };
 }
 

@@ -38,7 +38,15 @@ export default [
       "no-multiple-empty-lines": "off",
       "eol-last": "off",
 
+      // --- Structural limits ---
+      "max-depth": ["error", 2],
+      "max-lines-per-function": ["error", { max: 40, skipBlankLines: true, skipComments: true }],
+
       // --- TypeScript-specific ---
+      "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-imports" }],
+      "@typescript-eslint/consistent-type-definitions": ["error", "interface"],
+      "@typescript-eslint/prefer-readonly": "error",
+      "@typescript-eslint/use-unknown-in-catch-callback-variable": "error",
       "@typescript-eslint/explicit-function-return-type": [
         "error",
         {
@@ -58,7 +66,32 @@ export default [
       "@typescript-eslint/naming-convention": [
         "error",
         { selector: "default", format: ["camelCase"], leadingUnderscore: "allow" },
-        { selector: "variable", format: ["camelCase", "UPPER_CASE"], leadingUnderscore: "allow" },
+        {
+          selector: "variable",
+          format: ["camelCase", "UPPER_CASE"],
+          leadingUnderscore: "allow",
+          filter: {
+            regex: "(Map|Object|String|Array|List|Set|Dict|Number|Boolean|Fn|Func|Callback)$",
+            match: false,
+          },
+        },
+        {
+          selector: "function",
+          format: ["camelCase"],
+          filter: {
+            regex: "(Map|Object|String|Array|List|Set|Dict|Number|Boolean|Fn|Func|Callback)$",
+            match: false,
+          },
+        },
+        {
+          selector: "parameter",
+          format: ["camelCase"],
+          leadingUnderscore: "allow",
+          filter: {
+            regex: "(Map|Object|String|Array|List|Set|Dict|Number|Boolean|Fn|Func|Callback)$",
+            match: false,
+          },
+        },
         { selector: "typeLike", format: ["PascalCase"] },
         {
           selector: "objectLiteralProperty",
@@ -99,8 +132,12 @@ export default [
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/naming-convention": "off",
+      "@typescript-eslint/consistent-type-definitions": "off",
+      "@typescript-eslint/prefer-readonly": "off",
       "sonarjs/no-duplicate-string": "off",
       "sonarjs/cognitive-complexity": "off",
+      "max-depth": "off",
+      "max-lines-per-function": "off",
     },
   },
 ];

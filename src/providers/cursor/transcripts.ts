@@ -111,79 +111,102 @@ export interface CursorTranscriptSource {
   readSnapshot(now?: number): Promise<CursorTranscriptSourceResult>;
 }
 
+interface TranscriptSourceState {
+  readonly sourcePaths: readonly string[];
+  readonly sourceLabel: string;
+  connected: boolean;
+  readonly fileCache: Map<string, TranscriptFileCache>;
+}
+
 export function createCursorTranscriptSource(
   options: CursorTranscriptSourceOptions,
 ): CursorTranscriptSource {
-  const sourcePaths = Array.isArray(options.sourcePaths) ? [...options.sourcePaths] : [];
-  const sourceLabel = options.sourceLabel ?? CURSOR_SOURCE_KIND;
-  let connected = false;
-  const fileCache = new Map<string, TranscriptFileCache>();
-
-  function connect(): void {
-    connected = true;
-  }
-
-  function disconnect(): void {
-    connected = false;
-    fileCache.clear();
-  }
-
-  async function readSnapshot(now: number = Date.now()): Promise<CursorTranscriptSourceResult> {
-    if (!connected) {
-      return {
-        agents: [],
-        connected: false,
-        sourceLabel,
-        warnings: ["Cursor transcript source is disconnected."],
-      };
-    }
-
-    if (sourcePaths.length === 0) {
-      return {
-        agents: [],
-        connected: false,
-        sourceLabel,
-        warnings: ["No transcript paths configured."],
-      };
-    }
-
-    const orderedIds: string[] = [];
-    const latestById = new Map<string, CanonicalAgentSnapshot>();
-    const allWarnings: string[] = [];
-    let hasReadError = false;
-    let successfulReads = 0;
-
-    for (const sourcePath of sourcePaths) {
-      const result = await processSourceFile(sourcePath, now, fileCache);
-      allWarnings.push(...result.warnings);
-      if (result.success) {
-        successfulReads += 1;
-      } else {
-        hasReadError = true;
-      }
-      mergeAgents(result.agents, orderedIds, latestById);
-    }
-
-    pruneStaleCache(fileCache, sourcePaths);
-
-    const agents = orderedIds
-      .map((id) => latestById.get(id))
-      .filter((agent): agent is CanonicalAgentSnapshot => agent !== undefined);
-
-    return {
-      agents,
-      connected: successfulReads > 0 || !hasReadError,
-      sourceLabel,
-      warnings: allWarnings,
-    };
-  }
+  const state: TranscriptSourceState = {
+    sourcePaths: Array.isArray(options.sourcePaths) ? [...options.sourcePaths] : [],
+    sourceLabel: options.sourceLabel ?? CURSOR_SOURCE_KIND,
+    connected: false,
+    fileCache: new Map(),
+  };
 
   return {
     sourceKind: CURSOR_SOURCE_KIND,
-    connect,
-    disconnect,
-    readSnapshot,
+    connect: () => {
+      state.connected = true;
+    },
+    disconnect: () => {
+      state.connected = false;
+      state.fileCache.clear();
+    },
+    readSnapshot: (now: number = Date.now()) => readSnapshot(state, now),
   };
+}
+
+async function readSnapshot(
+  state: TranscriptSourceState,
+  now: number,
+): Promise<CursorTranscriptSourceResult> {
+  if (!state.connected) {
+    return disconnectedResult(state.sourceLabel, "Cursor transcript source is disconnected.");
+  }
+
+  if (state.sourcePaths.length === 0) {
+    return disconnectedResult(state.sourceLabel, "No transcript paths configured.");
+  }
+
+  const { agents, warnings, successfulReads, hasReadError } = await aggregateSourceFiles(
+    state.sourcePaths,
+    now,
+    state.fileCache,
+  );
+
+  return {
+    agents,
+    connected: successfulReads > 0 || !hasReadError,
+    sourceLabel: state.sourceLabel,
+    warnings,
+  };
+}
+
+function disconnectedResult(sourceLabel: string, warning: string): CursorTranscriptSourceResult {
+  return { agents: [], connected: false, sourceLabel, warnings: [warning] };
+}
+
+interface AggregateResult {
+  agents: CanonicalAgentSnapshot[];
+  warnings: string[];
+  successfulReads: number;
+  hasReadError: boolean;
+}
+
+async function aggregateSourceFiles(
+  sourcePaths: readonly string[],
+  now: number,
+  fileCache: Map<string, TranscriptFileCache>,
+): Promise<AggregateResult> {
+  const orderedIds: string[] = [];
+  const latestById = new Map<string, CanonicalAgentSnapshot>();
+  const allWarnings: string[] = [];
+  let hasReadError = false;
+  let successfulReads = 0;
+
+  for (const sourcePath of sourcePaths) {
+    const result = await processSourceFile(sourcePath, now, fileCache);
+    allWarnings.push(...result.warnings);
+    if (result.success) {
+      successfulReads += 1;
+    } else {
+      hasReadError = true;
+    }
+    mergeAgents(result.agents, orderedIds, latestById);
+  }
+
+  pruneStaleCache(fileCache, [...sourcePaths]);
+
+  const agents = orderedIds
+    .map((id) => latestById.get(id))
+    .filter((agent): agent is CanonicalAgentSnapshot => agent !== undefined);
+
+  return { agents, warnings: allWarnings, successfulReads, hasReadError };
 }
 
 interface ParseStrategy {
@@ -207,31 +230,70 @@ async function processSourceFile(
   now: number,
   fileCache: Map<string, TranscriptFileCache>,
 ): Promise<ProcessFileResult> {
-  const warnings: string[] = [];
   const { fileUpdatedAt, fileSizeBytes } = await statSourceFile(sourcePath, now);
-
   const cached = fileCache.get(sourcePath);
 
-  if (cached && cached.mtimeMs === fileUpdatedAt && cached.sizeBytes === fileSizeBytes) {
+  const cacheHit = tryCacheHit(cached, fileUpdatedAt, fileSizeBytes, sourcePath, now);
+  if (cacheHit) {
+    if (cacheHit.updatedCache) {
+      fileCache.set(sourcePath, cacheHit.updatedCache);
+    }
+    return cacheHit.result;
+  }
+
+  return parseAndCacheFile(sourcePath, now, fileCache, fileSizeBytes, fileUpdatedAt, cached);
+}
+
+interface CacheHitResult {
+  result: ProcessFileResult;
+  updatedCache?: TranscriptFileCache;
+}
+
+function tryCacheHit(
+  cached: TranscriptFileCache | undefined,
+  fileUpdatedAt: number,
+  fileSizeBytes: number,
+  sourcePath: string,
+  now: number,
+): CacheHitResult | null {
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.mtimeMs === fileUpdatedAt && cached.sizeBytes === fileSizeBytes) {
     return {
-      agents: resolveAgentsFromState(cached.state, sourcePath, cached.fileUpdatedAt, now),
-      success: true,
-      warnings,
+      result: {
+        agents: resolveAgentsFromState(cached.state, sourcePath, cached.fileUpdatedAt, now),
+        success: true,
+        warnings: [],
+      },
     };
   }
 
-  const contentChanged = !cached || fileSizeBytes !== cached.sizeBytes;
-  const effectiveUpdatedAt = contentChanged ? fileUpdatedAt : cached.fileUpdatedAt;
-
-  if (cached && !contentChanged) {
-    fileCache.set(sourcePath, { ...cached, mtimeMs: fileUpdatedAt });
+  const contentChanged = fileSizeBytes !== cached.sizeBytes;
+  if (!contentChanged) {
     return {
-      agents: resolveAgentsFromState(cached.state, sourcePath, effectiveUpdatedAt, now),
-      success: true,
-      warnings,
+      result: {
+        agents: resolveAgentsFromState(cached.state, sourcePath, cached.fileUpdatedAt, now),
+        success: true,
+        warnings: [],
+      },
+      updatedCache: { ...cached, mtimeMs: fileUpdatedAt },
     };
   }
 
+  return null;
+}
+
+async function parseAndCacheFile(
+  sourcePath: string,
+  now: number,
+  fileCache: Map<string, TranscriptFileCache>,
+  fileSizeBytes: number,
+  fileUpdatedAt: number,
+  cached: TranscriptFileCache | undefined,
+): Promise<ProcessFileResult> {
+  const warnings: string[] = [];
   const contents = await readSourceFile(sourcePath);
   if (contents === null) {
     warnings.push(`Failed to read transcript path: ${sourcePath}`);
@@ -240,7 +302,6 @@ async function processSourceFile(
 
   const lines = contents.split(/\r?\n/);
   const { state, startLine } = resolveParseStrategy(cached, fileSizeBytes, lines.length);
-
   accumulateLines(state, lines, startLine, sourcePath, warnings);
 
   fileCache.set(sourcePath, {
@@ -248,11 +309,11 @@ async function processSourceFile(
     sizeBytes: fileSizeBytes,
     lineCount: lines.length,
     state: cloneParseState(state),
-    fileUpdatedAt: effectiveUpdatedAt,
+    fileUpdatedAt,
   });
 
   return {
-    agents: resolveAgentsFromState(state, sourcePath, effectiveUpdatedAt, now),
+    agents: resolveAgentsFromState(state, sourcePath, fileUpdatedAt, now),
     success: true,
     warnings,
   };

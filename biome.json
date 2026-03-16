@@ -23,6 +23,7 @@
       },
       "style": {
         "noParameterAssign": "error",
+        "noDefaultExport": "error",
         "noRestrictedImports": {
           "level": "error",
           "options": {
@@ -46,6 +47,18 @@
       "arrowParentheses": "always"
     }
   },
+  "overrides": [
+    {
+      "includes": ["*.config.ts", "*.config.js"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off"
+          }
+        }
+      }
+    }
+  ],
   "assist": {
     "enabled": true,
     "actions": {

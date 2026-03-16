@@ -81,78 +81,96 @@ interface SessionFileCache {
   fileUpdatedAt: number;
 }
 
+interface SourceState {
+  connected: boolean;
+  fileCache: Map<string, SessionFileCache>;
+}
+
 export function createClaudeCodeTranscriptSource(
   options: ClaudeCodeTranscriptSourceOptions,
 ): ClaudeCodeTranscriptSource {
   const sourcePaths = Array.isArray(options.sourcePaths) ? [...options.sourcePaths] : [];
   const sourceLabel = options.sourceLabel ?? CLAUDE_CODE_SOURCE_KIND;
-  let connected = false;
-  const fileCache = new Map<string, SessionFileCache>();
-
-  function connect(): void {
-    connected = true;
-  }
-
-  function disconnect(): void {
-    connected = false;
-    fileCache.clear();
-  }
-
-  async function readSnapshot(now: number = Date.now()): Promise<ClaudeCodeTranscriptSourceResult> {
-    if (!connected) {
-      return {
-        agents: [],
-        connected: false,
-        sourceLabel,
-        warnings: ["Claude Code transcript source is disconnected."],
-      };
-    }
-
-    if (sourcePaths.length === 0) {
-      return {
-        agents: [],
-        connected: false,
-        sourceLabel,
-        warnings: ["No session paths configured."],
-      };
-    }
-
-    const orderedIds: string[] = [];
-    const latestById = new Map<string, CanonicalAgentSnapshot>();
-    const allWarnings: string[] = [];
-    let hasReadError = false;
-    let successfulReads = 0;
-
-    for (const sourcePath of sourcePaths) {
-      const result = await processSourceFile(sourcePath, now, fileCache);
-      allWarnings.push(...result.warnings);
-      if (result.success) {
-        successfulReads += 1;
-      } else {
-        hasReadError = true;
-      }
-      mergeAgents(result.agents, orderedIds, latestById);
-    }
-
-    pruneStaleCache(fileCache, sourcePaths);
-
-    const agents = orderedIds
-      .map((id) => latestById.get(id))
-      .filter((agent): agent is CanonicalAgentSnapshot => agent !== undefined);
-
-    return {
-      agents,
-      connected: successfulReads > 0 || !hasReadError,
-      sourceLabel,
-      warnings: allWarnings,
-    };
-  }
+  const state: SourceState = {
+    connected: false,
+    fileCache: new Map(),
+  };
 
   return {
     sourceKind: CLAUDE_CODE_SOURCE_KIND,
-    connect,
-    disconnect,
-    readSnapshot,
+    connect(): void {
+      state.connected = true;
+    },
+    disconnect(): void {
+      state.connected = false;
+      state.fileCache.clear();
+    },
+    readSnapshot: (now: number = Date.now()) =>
+      performReadSnapshot(state, sourcePaths, sourceLabel, now),
+  };
+}
+
+function performReadSnapshot(
+  state: SourceState,
+  sourcePaths: readonly string[],
+  sourceLabel: string,
+  now: number,
+): Promise<ClaudeCodeTranscriptSourceResult> {
+  if (!state.connected) {
+    return Promise.resolve({
+      agents: [],
+      connected: false,
+      sourceLabel,
+      warnings: ["Claude Code transcript source is disconnected."],
+    });
+  }
+
+  if (sourcePaths.length === 0) {
+    return Promise.resolve({
+      agents: [],
+      connected: false,
+      sourceLabel,
+      warnings: ["No session paths configured."],
+    });
+  }
+
+  return collectSourceResults(state, sourcePaths, sourceLabel, now);
+}
+
+async function collectSourceResults(
+  state: SourceState,
+  sourcePaths: readonly string[],
+  sourceLabel: string,
+  now: number,
+): Promise<ClaudeCodeTranscriptSourceResult> {
+  const orderedIds: string[] = [];
+  const latestById = new Map<string, CanonicalAgentSnapshot>();
+  const allWarnings: string[] = [];
+  let hasReadError = false;
+  let successfulReads = 0;
+
+  for (const sourcePath of sourcePaths) {
+    const result = await processSourceFile(sourcePath, now, state.fileCache);
+    allWarnings.push(...result.warnings);
+    if (result.success) {
+      successfulReads += 1;
+    } else {
+      hasReadError = true;
+    }
+    mergeAgents(result.agents, orderedIds, latestById);
+  }
+
+  pruneStaleCache(state.fileCache, sourcePaths);
+
+  const agents = orderedIds
+    .map((id) => latestById.get(id))
+    .filter((agent): agent is CanonicalAgentSnapshot => agent !== undefined);
+
+  return {
+    agents,
+    connected: successfulReads > 0 || !hasReadError,
+    sourceLabel,
+    warnings: allWarnings,
   };
 }
 
@@ -177,39 +195,70 @@ async function processSourceFile(
   now: number,
   fileCache: Map<string, SessionFileCache>,
 ): Promise<ProcessFileResult> {
-  const warnings: string[] = [];
   const { fileUpdatedAt, fileSizeBytes } = await statSourceFile(sourcePath, now);
-
   const cached = fileCache.get(sourcePath);
 
-  if (cached && cached.mtimeMs === fileUpdatedAt && cached.sizeBytes === fileSizeBytes) {
+  const cacheHit = tryCacheHit(cached, fileUpdatedAt, fileSizeBytes, now, fileCache, sourcePath);
+  if (cacheHit) {
+    return cacheHit;
+  }
+
+  return parseAndCacheFile(sourcePath, now, fileCache, cached, fileUpdatedAt, fileSizeBytes);
+}
+
+function tryCacheHit(
+  cached: SessionFileCache | undefined,
+  fileUpdatedAt: number,
+  fileSizeBytes: number,
+  now: number,
+  fileCache: Map<string, SessionFileCache>,
+  sourcePath: string,
+): ProcessFileResult | undefined {
+  if (!cached) {
+    return undefined;
+  }
+
+  if (cached.mtimeMs === fileUpdatedAt && cached.sizeBytes === fileSizeBytes) {
     return {
       agents: resolveAgentsFromState(cached.state, cached.fileUpdatedAt, now),
       success: true,
-      warnings,
+      warnings: [],
     };
   }
 
-  const contentChanged = !cached || fileSizeBytes !== cached.sizeBytes;
-  const effectiveUpdatedAt = contentChanged ? fileUpdatedAt : cached.fileUpdatedAt;
-
-  if (cached && !contentChanged) {
+  const contentChanged = fileSizeBytes !== cached.sizeBytes;
+  if (!contentChanged) {
     fileCache.set(sourcePath, { ...cached, mtimeMs: fileUpdatedAt });
     return {
-      agents: resolveAgentsFromState(cached.state, effectiveUpdatedAt, now),
+      agents: resolveAgentsFromState(cached.state, cached.fileUpdatedAt, now),
       success: true,
-      warnings,
+      warnings: [],
     };
   }
 
+  return undefined;
+}
+
+async function parseAndCacheFile(
+  sourcePath: string,
+  now: number,
+  fileCache: Map<string, SessionFileCache>,
+  cached: SessionFileCache | undefined,
+  fileUpdatedAt: number,
+  fileSizeBytes: number,
+): Promise<ProcessFileResult> {
   const contents = await readSourceFile(sourcePath);
   if (contents === null) {
-    warnings.push(`Failed to read session path: ${sourcePath}`);
-    return { agents: [], success: false, warnings };
+    return {
+      agents: [],
+      success: false,
+      warnings: [`Failed to read session path: ${sourcePath}`],
+    };
   }
 
   const lines = contents.split(/\r?\n/);
   const { state, startLine } = resolveParseStrategy(cached, fileSizeBytes, lines.length);
+  const warnings: string[] = [];
 
   accumulateLines(state, lines, startLine, sourcePath, warnings);
 
@@ -218,11 +267,11 @@ async function processSourceFile(
     sizeBytes: fileSizeBytes,
     lineCount: lines.length,
     state: cloneParseState(state),
-    fileUpdatedAt: effectiveUpdatedAt,
+    fileUpdatedAt,
   });
 
   return {
-    agents: resolveAgentsFromState(state, effectiveUpdatedAt, now),
+    agents: resolveAgentsFromState(state, fileUpdatedAt, now),
     success: true,
     warnings,
   };
@@ -403,11 +452,21 @@ function resolveAgentsFromState(
     return [];
   }
 
-  const agents: CanonicalAgentSnapshot[] = [];
+  const sessionId = state.sessionId;
+  const parentAgent = buildParentAgent(state, sessionId, fileUpdatedAt, now);
+  const subagentSnapshots = buildSubagents(state, sessionId, now);
+  return [parentAgent, ...subagentSnapshots];
+}
 
-  const parentId = deriveAgentId(state.sessionId);
+function buildParentAgent(
+  state: SessionParseState,
+  sessionId: string,
+  fileUpdatedAt: number,
+  now: number,
+): CanonicalAgentSnapshot {
+  const parentId = deriveAgentId(sessionId);
   const parentUpdatedAt = state.latestTimestamp ?? fileUpdatedAt;
-  agents.push({
+  return {
     id: parentId,
     name: deriveAgentName(parentId, false),
     kind: CANONICAL_AGENT_KIND.local,
@@ -426,10 +485,17 @@ function resolveAgentsFromState(
       messageCount: state.messageCount,
       toolCallCount: state.toolCallCount,
     },
-  });
+  };
+}
 
+function buildSubagents(
+  state: SessionParseState,
+  sessionId: string,
+  now: number,
+): CanonicalAgentSnapshot[] {
+  const agents: CanonicalAgentSnapshot[] = [];
   for (const [agentId, sub] of state.subagents) {
-    const subId = `${state.sessionId}:${agentId}`;
+    const subId = `${sessionId}:${agentId}`;
     agents.push({
       id: subId,
       name: deriveAgentName(agentId, true),
@@ -443,12 +509,11 @@ function resolveAgentsFromState(
       metadata: {
         model: state.model,
         gitBranch: state.gitBranch,
-        parentSessionId: state.sessionId,
+        parentSessionId: sessionId,
         progressCount: sub.progressCount,
       },
     });
   }
-
   return agents;
 }
 

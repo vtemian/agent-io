@@ -21,177 +21,217 @@ function groupByKey<T>(items: readonly T[], keyFn: (item: T) => string): Map<str
   return map;
 }
 
-export function createCompositeProvider(providers: TranscriptProvider[]): TranscriptProvider {
-  async function discover(workspacePaths: string[]): Promise<DiscoveryResult> {
-    const allInputs: DiscoveryInput[] = [];
-    const allWatchPaths: string[] = [];
-    const allWarnings: string[] = [];
+function tagInputsWithProvider(
+  inputs: readonly DiscoveryInput[],
+  providerId: string,
+): DiscoveryInput[] {
+  return inputs.map((input) => ({
+    ...input,
+    metadata: { ...input.metadata, providerId },
+  }));
+}
 
-    for (const provider of providers) {
-      try {
-        const result = await provider.discover(workspacePaths);
-        for (const input of result.inputs) {
-          allInputs.push({
-            ...input,
-            metadata: { ...input.metadata, providerId: provider.id },
-          });
-        }
-        allWatchPaths.push(...result.watchPaths);
-        allWarnings.push(...result.warnings);
-      } catch (error) {
-        allWarnings.push(`[${provider.id}] ${toError(error).message}`);
-      }
+async function discoverAll(
+  providers: TranscriptProvider[],
+  workspacePaths: string[],
+): Promise<DiscoveryResult> {
+  const allInputs: DiscoveryInput[] = [];
+  const allWatchPaths: string[] = [];
+  const allWarnings: string[] = [];
+
+  for (const provider of providers) {
+    try {
+      const result = await provider.discover(workspacePaths);
+      allInputs.push(...tagInputsWithProvider(result.inputs, provider.id));
+      allWatchPaths.push(...result.watchPaths);
+      allWarnings.push(...result.warnings);
+    } catch (error) {
+      allWarnings.push(`[${provider.id}] ${toError(error).message}`);
+    }
+  }
+
+  return {
+    inputs: allInputs,
+    watchPaths: [...new Set(allWatchPaths)],
+    warnings: allWarnings.length > 0 ? [...new Set(allWarnings)] : [],
+  };
+}
+
+async function connectAll(providers: TranscriptProvider[]): Promise<void> {
+  for (const provider of providers) {
+    try {
+      await provider.connect?.();
+    } catch {
+      // best-effort: continue connecting remaining providers
+    }
+  }
+}
+
+async function disconnectAll(providers: TranscriptProvider[]): Promise<void> {
+  let firstError: unknown;
+  for (const provider of providers) {
+    try {
+      await provider.disconnect?.();
+    } catch (error) {
+      firstError ??= error;
+    }
+  }
+  if (firstError) {
+    throw toError(firstError);
+  }
+}
+
+function extractProviderInputs(inputs: DiscoveryInput[]): Map<string, DiscoveryInput[]> {
+  return groupByKey(inputs, (input) => {
+    const id = input.metadata?.providerId;
+    return typeof id === "string" ? id : "";
+  });
+}
+
+async function readAll(
+  providers: TranscriptProvider[],
+  inputs: DiscoveryInput[],
+  now: number = Date.now(),
+): Promise<TranscriptReadResult> {
+  const inputsByProvider = extractProviderInputs(inputs);
+  const allRecords: TranscriptReadResult["records"] = [];
+  const allWarnings: string[] = [];
+  let anyConnected = false;
+  const sourceLabels: string[] = [];
+
+  for (const provider of providers) {
+    const providerInputs = inputsByProvider.get(provider.id) ?? [];
+    if (providerInputs.length === 0) {
+      continue;
+    }
+    const partial = await readFromProvider(provider, providerInputs, now);
+    allRecords.push(...partial.records);
+    allWarnings.push(...partial.warnings);
+    anyConnected = anyConnected || partial.connected;
+    if (partial.sourceLabel) {
+      sourceLabels.push(partial.sourceLabel);
+    }
+  }
+
+  return {
+    records: allRecords,
+    health: {
+      connected: anyConnected,
+      sourceLabel: sourceLabels.join("+"),
+      warnings: allWarnings,
+    },
+  };
+}
+
+interface ProviderReadPartial {
+  records: TranscriptReadResult["records"];
+  warnings: string[];
+  connected: boolean;
+  sourceLabel: string;
+}
+
+async function readFromProvider(
+  provider: TranscriptProvider,
+  inputs: DiscoveryInput[],
+  now: number,
+): Promise<ProviderReadPartial> {
+  try {
+    const result = await provider.read(inputs, now);
+    return {
+      records: result.records,
+      warnings: result.health.warnings,
+      connected: result.health.connected,
+      sourceLabel: result.health.sourceLabel,
+    };
+  } catch (error) {
+    return {
+      records: [],
+      warnings: [`[${provider.id}] ${toError(error).message}`],
+      connected: false,
+      sourceLabel: "",
+    };
+  }
+}
+
+async function normalizeAll(
+  providers: TranscriptProvider[],
+  readResult: TranscriptReadResult,
+  now: number,
+): Promise<CanonicalSnapshot> {
+  const recordsByProvider = groupByKey(readResult.records, (record) => record.provider);
+
+  const allAgents: CanonicalAgentSnapshot[] = [];
+  const allWarnings: string[] = [];
+  let anyConnected = false;
+
+  for (const provider of providers) {
+    const providerRecords = recordsByProvider.get(provider.id) ?? [];
+    if (providerRecords.length === 0) {
+      continue;
     }
 
-    return {
-      inputs: allInputs,
-      watchPaths: [...new Set(allWatchPaths)],
+    const providerReadResult: TranscriptReadResult = {
+      records: providerRecords,
+      health: readResult.health,
+    };
+
+    const normalized = await provider.normalize(providerReadResult, now);
+    allAgents.push(...normalized.agents);
+    allWarnings.push(...normalized.health.warnings);
+    anyConnected = anyConnected || normalized.health.connected;
+  }
+
+  return {
+    agents: allAgents,
+    health: {
+      connected: anyConnected,
+      sourceLabel: readResult.health.sourceLabel,
       warnings: allWarnings.length > 0 ? [...new Set(allWarnings)] : [],
-    };
+    },
+  };
+}
+
+function buildCompositeWatch(watchProviders: TranscriptProvider[]): TranscriptProvider["watch"] {
+  if (watchProviders.length === 0) {
+    return undefined;
   }
 
-  async function connect(): Promise<void> {
-    for (const provider of providers) {
-      try {
-        await provider.connect?.();
-      } catch {
-        // best-effort: continue connecting remaining providers
-      }
-    }
-  }
-
-  async function disconnect(): Promise<void> {
-    let firstError: unknown;
-    for (const provider of providers) {
-      try {
-        await provider.disconnect?.();
-      } catch (error) {
-        firstError ??= error;
-      }
-    }
-    if (firstError) {
-      throw toError(firstError);
-    }
-  }
-
-  async function read(
-    inputs: DiscoveryInput[],
-    now: number = Date.now(),
-  ): Promise<TranscriptReadResult> {
-    const inputsByProvider = groupByKey(inputs, (input) => {
-      const id = input.metadata?.providerId;
-      return typeof id === "string" ? id : "";
-    });
-
-    const allRecords: TranscriptReadResult["records"] = [];
-    const allWarnings: string[] = [];
-    let anyConnected = false;
-    const sourceLabels: string[] = [];
-
-    for (const provider of providers) {
-      const providerInputs = inputsByProvider.get(provider.id) ?? [];
-      if (providerInputs.length === 0) {
-        continue;
-      }
-
-      try {
-        const result = await provider.read(providerInputs, now);
-        allRecords.push(...result.records);
-        allWarnings.push(...result.health.warnings);
-        if (result.health.connected) {
-          anyConnected = true;
-        }
-        sourceLabels.push(result.health.sourceLabel);
-      } catch (error) {
-        allWarnings.push(`[${provider.id}] ${toError(error).message}`);
-      }
-    }
-
-    return {
-      records: allRecords,
-      health: {
-        connected: anyConnected,
-        sourceLabel: sourceLabels.join("+"),
-        warnings: allWarnings,
-      },
-    };
-  }
-
-  async function normalize(
-    readResult: TranscriptReadResult,
-    now: number,
-  ): Promise<CanonicalSnapshot> {
-    const recordsByProvider = groupByKey(readResult.records, (record) => record.provider);
-
-    const allAgents: CanonicalAgentSnapshot[] = [];
-    const allWarnings: string[] = [];
-    let anyConnected = false;
-
-    for (const provider of providers) {
-      const providerRecords = recordsByProvider.get(provider.id) ?? [];
-      if (providerRecords.length === 0) {
-        continue;
-      }
-
-      const providerReadResult: TranscriptReadResult = {
-        records: providerRecords,
-        health: readResult.health,
+  return {
+    debounceMs: Math.min(
+      ...watchProviders.map((p) => p.watch?.debounceMs ?? DEFAULT_WATCH_DEBOUNCE_MS),
+    ),
+    subscribe(
+      watchPath: string,
+      onEvent: () => void,
+      onError: (error: Error) => void,
+    ): { close(): void } {
+      const subs = subscribeAll(watchProviders, watchPath, onEvent, onError);
+      return {
+        close() {
+          for (const sub of subs) {
+            try {
+              sub.close();
+            } catch {
+              // best-effort cleanup
+            }
+          }
+        },
       };
+    },
+  };
+}
 
-      const normalized = await provider.normalize(providerReadResult, now);
-      allAgents.push(...normalized.agents);
-      allWarnings.push(...normalized.health.warnings);
-      if (normalized.health.connected) {
-        anyConnected = true;
-      }
-    }
-
-    return {
-      agents: allAgents,
-      health: {
-        connected: anyConnected,
-        sourceLabel: readResult.health.sourceLabel,
-        warnings: allWarnings.length > 0 ? [...new Set(allWarnings)] : [],
-      },
-    };
-  }
-
+export function createCompositeProvider(providers: TranscriptProvider[]): TranscriptProvider {
   const watchProviders = providers.filter((p) => p.watch);
-  const compositeWatch =
-    watchProviders.length > 0
-      ? {
-          debounceMs: Math.min(
-            ...watchProviders.map((p) => p.watch?.debounceMs ?? DEFAULT_WATCH_DEBOUNCE_MS),
-          ),
-          subscribe(
-            watchPath: string,
-            onEvent: () => void,
-            onError: (error: Error) => void,
-          ): { close(): void } {
-            const subs = subscribeAll(watchProviders, watchPath, onEvent, onError);
-            return {
-              close() {
-                for (const sub of subs) {
-                  try {
-                    sub.close();
-                  } catch {
-                    // best-effort cleanup
-                  }
-                }
-              },
-            };
-          },
-        }
-      : undefined;
 
   return {
     id: providers.map((p) => p.id).join("+"),
-    discover,
-    connect,
-    disconnect,
-    read,
-    normalize,
-    watch: compositeWatch,
+    discover: (workspacePaths) => discoverAll(providers, workspacePaths),
+    connect: () => connectAll(providers),
+    disconnect: () => disconnectAll(providers),
+    read: (inputs, now) => readAll(providers, inputs, now),
+    normalize: (readResult, now) => normalizeAll(providers, readResult, now),
+    watch: buildCompositeWatch(watchProviders),
   };
 }
 
