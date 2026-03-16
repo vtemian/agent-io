@@ -13,9 +13,12 @@ Unlike traditional observability tools (AgentOps, LangSmith) that require active
 It is designed in layers:
 
 - `core`: generic runtime + lifecycle diffing (tool-agnostic)
-- `providers/cursor`: Cursor transcript discovery + parsing adapter
+- `providers/cursor`: Cursor transcript discovery + parsing
+- `providers/claude-code`: Claude Code session discovery + parsing
+- `providers/codex`: Codex JSONL session discovery + parsing
+- `providers/opencode`: OpenCode SQLite database adapter
 
-The core observer API is provider-injected and tool-agnostic. Cursor is currently the built-in provider, with support planned for Claude Code, Codex, OpenCode, and custom systems.
+The core observer API is provider-injected and tool-agnostic. All four providers are enabled by default.
 
 ## Install
 
@@ -42,7 +45,7 @@ await observer.start();
 await observer.stop();
 ```
 
-`createObserver` defaults to the built-in Cursor provider. You can pass a custom `provider`, `debounceMs`, or `checkIdleDelayMs` as needed.
+`createObserver` enables all four built-in providers (Cursor, Claude Code, Codex, OpenCode) by default. You can pass a custom `providers` array, `debounceMs`, or `checkIdleDelayMs` as needed.
 
 ## How Runtime Works
 
@@ -120,9 +123,12 @@ When a provider exposes `subscribeToChanges`, runtime subscriptions:
 
 ## Public Entry Points
 
-- `@agentprobe/core` — full package (core + Cursor provider, `createObserver` defaults to Cursor)
+- `@agentprobe/core` — full package with all providers, `createObserver` enables all by default
 - `@agentprobe/core/core` — core runtime, lifecycle, model, and provider types only
-- `@agentprobe/core/providers/cursor` — Cursor transcript provider only
+- `@agentprobe/core/providers/cursor` — Cursor transcript provider
+- `@agentprobe/core/providers/claude-code` — Claude Code session provider
+- `@agentprobe/core/providers/codex` — Codex session provider
+- `@agentprobe/core/providers/opencode` — OpenCode database provider
 
 ## Development
 
@@ -143,9 +149,7 @@ npm run build
 
 ## Examples
 
-See:
-
-- `examples/provider-observer.ts` (provider-injected API)
+See the [`examples/`](examples/) directory for 9 self-contained demos — from a minimal observer to a full terminal dashboard and floating macOS overlay.
 
 ---
 
