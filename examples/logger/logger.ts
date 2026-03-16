@@ -43,7 +43,7 @@ observer.subscribe((event) => {
     toStatus: change.toStatus,
     taskSummary: agent.taskSummary,
   };
-  appendFileSync(outputFile, JSON.stringify(record) + "\n");
+  appendFileSync(outputFile, `${JSON.stringify(record)}\n`);
   eventCount++;
   agentsSeen.add(agent.id);
   const summary = (agent.taskSummary ?? "").slice(0, MAX_SUMMARY_LENGTH);

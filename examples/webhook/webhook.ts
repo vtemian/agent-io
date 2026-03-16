@@ -6,11 +6,12 @@ import {
 
 type AgentInfo = Pick<CanonicalAgentSnapshot, "source" | "taskSummary" | "id" | "updatedAt">;
 
-const WEBHOOK_URL = process.env.WEBHOOK_URL;
-if (!WEBHOOK_URL) {
+const WEBHOOK_URL_RAW = process.env.WEBHOOK_URL;
+if (!WEBHOOK_URL_RAW) {
   console.error("Missing WEBHOOK_URL env var");
   process.exit(1);
 }
+const WEBHOOK_URL: string = WEBHOOK_URL_RAW;
 
 const SOURCE_LABELS: Record<string, string> = {
   "cursor-transcripts": "Cursor",

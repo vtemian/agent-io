@@ -9,7 +9,10 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 const MAX_SUMMARY_LENGTH = 80;
-const NOTIFY_STATUSES = new Set([CANONICAL_AGENT_STATUS.completed, CANONICAL_AGENT_STATUS.error]);
+const NOTIFY_STATUSES: Set<string> = new Set([
+  CANONICAL_AGENT_STATUS.completed,
+  CANONICAL_AGENT_STATUS.error,
+]);
 
 const workspacePaths = process.argv.slice(2);
 if (workspacePaths.length === 0) workspacePaths.push(process.cwd());
