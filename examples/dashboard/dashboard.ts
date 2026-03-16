@@ -19,6 +19,7 @@ const STATUS_COLORS: Record<string, string> = {
 const TABLE_HEADERS = ["Source", "Status", "Task", "Duration"];
 const MAX_LOG_SUMMARY = 60;
 const MAX_TABLE_SUMMARY = 48;
+const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
 const workspacePaths = process.argv.slice(2);
 if (workspacePaths.length === 0) workspacePaths.push(process.cwd());
@@ -99,11 +100,17 @@ function addLogEntry(kind: string, agent: CanonicalAgentSnapshot): void {
 // --- Render ---
 
 function render(): void {
+  const now = Date.now();
+  const visible = agents.filter((a) => {
+    if (a.status !== "completed" && a.status !== "error") return true;
+    return now - a.updatedAt < STALE_THRESHOLD_MS;
+  });
+
   header.setContent(
-    `  agentprobe   agents: ${agents.length}   uptime: ${fmtElapsed(Date.now() - startTime)}`,
+    `  agentprobe   agents: ${visible.length}/${agents.length}   uptime: ${fmtElapsed(now - startTime)}`,
   );
 
-  if (agents.length === 0) {
+  if (visible.length === 0) {
     table.setData({
       headers: TABLE_HEADERS,
       data: [["", "{yellow-fg}No active agents \u2014 waiting...{/yellow-fg}", "", ""]],
@@ -111,9 +118,9 @@ function render(): void {
   } else {
     table.setData({
       headers: TABLE_HEADERS,
-      data: agents.map((a) => [
+      data: visible.map((a) => [
         srcLabel(a.source),
-        statusTag(a.status),
+        a.status,
         a.taskSummary.slice(0, MAX_TABLE_SUMMARY),
         fmtDuration(a.startedAt),
       ]),

@@ -1,4 +1,4 @@
-# Glimpse Agent Monitor
+# Glimpse
 
 A floating, always-on-top overlay that shows active coding agents in real time. Built with [GlimpseUI](https://github.com/nicktrav/glimpseui) and `@agentprobe/core`.
 
@@ -17,34 +17,28 @@ npm install
 
 ## Run
 
-### agent-monitor (pinned overlay)
-
 ```bash
-npx tsx agent-monitor.ts [workspace-path]
+npx tsx glimpse.ts [workspace-path]
 ```
 
-Opens a transparent window pinned to the top-left corner of your screen (position 20, 100).
-
-### floating-monitor (click-through HUD)
+For a click-through HUD that passes clicks to whatever is underneath:
 
 ```bash
-npx tsx floating-monitor.ts [workspace-path]
+npx tsx glimpse.ts --click-through [workspace-path]
 ```
 
-A more compact, click-through variant. The window floats above all apps and passes clicks through to whatever is underneath, so it never interferes with your workflow. Slightly smaller dimensions and tighter spacing compared to the pinned monitor.
-
-If no workspace path is provided, both monitors default to the current working directory.
+If no workspace path is provided, it defaults to the current working directory.
 
 ## What it does
 
-Both monitors display every active coding agent (Cursor, Claude Code, Codex, OpenCode) detected in the given workspace, with:
+Displays every active coding agent (Cursor, Claude Code, Codex, OpenCode) detected in the given workspace as a compact floating overlay:
 
-- A colored status dot (green = running, yellow = idle, gray = completed, red = error)
-- The agent's source label
-- The current task summary
-- A relative timestamp ("3s ago", "2m ago")
-
-The window auto-updates every second and fades agents in/out as they join or leave.
+- Colored status dot (green = running, yellow = idle, gray = completed, red = error)
+- Source label and current task summary
+- Time since last update and total duration ("3s / 2m")
+- Auto-resizes based on agent count
+- Fades agents in/out as they join or leave
+- Hides completed/error agents after 5 minutes
 
 ## Demo
 
