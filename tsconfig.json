@@ -13,6 +13,7 @@
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
     "types": ["node", "vitest/globals"],
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
