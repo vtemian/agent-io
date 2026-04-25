@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PROVIDER_KINDS } from "@/core/providers";
 import { openCode } from "@/providers/opencode/provider";
-import { createTestDb, seedMessage, seedProject } from "./opencode-fixtures";
+import { createTestDb, hasSqlite, seedMessage, seedProject } from "./opencode-fixtures";
 
-describe("opencode provider", () => {
+(hasSqlite ? describe : describe.skip)("opencode provider", () => {
   let db: ReturnType<typeof createTestDb>;
 
   beforeEach(() => {
