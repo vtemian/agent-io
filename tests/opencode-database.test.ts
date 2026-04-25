@@ -1,10 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createOpenCodeDatabase, type OpenCodeDatabase } from "@/providers/opencode/database";
-import { createTestDb, seedMessage, seedPart, seedProject, seedSession } from "./opencode-fixtures";
+import {
+  createTestDb,
+  hasSqlite,
+  seedMessage,
+  seedPart,
+  seedProject,
+  seedSession,
+} from "./opencode-fixtures";
 
 const MS_PER_DAY = 86_400_000;
 
-describe("opencode database", () => {
+(hasSqlite ? describe : describe.skip)("opencode database", () => {
   let rawDb: ReturnType<typeof createTestDb>;
   let ocDb: OpenCodeDatabase;
 

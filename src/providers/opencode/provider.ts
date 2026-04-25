@@ -1,4 +1,6 @@
-import betterSqlite3 from "better-sqlite3";
+import { createRequire } from "node:module";
+import type { Database as SqliteDatabase } from "better-sqlite3";
+
 import {
   type DiscoveryInput,
   type DiscoveryResult,
@@ -25,17 +27,19 @@ import { createOpenCodeDatabase, type OpenCodeDatabase, type SessionStats } from
 import type { SessionRow } from "./schemas";
 import { createOpenCodeWatch } from "./watch";
 
+const req = createRequire(import.meta.url);
+
 export interface OpenCodeOptions {
   dbPath?: string;
   sourceLabel?: string;
   sessionWindowMs?: number;
   watch?: false | { pollIntervalMs?: number };
   /** @internal for testing — inject an open database */
-  _testDb?: betterSqlite3.Database;
+  _testDb?: SqliteDatabase;
 }
 
 interface ProviderState {
-  db: betterSqlite3.Database | undefined;
+  db: SqliteDatabase | undefined;
   ocDb: OpenCodeDatabase | undefined;
   projectIds: string[] | undefined;
   workspaceKey: string | undefined;
@@ -81,12 +85,45 @@ function openDb(state: ProviderState, options: OpenCodeOptions): void {
   }
   const dbPath = options.dbPath ?? OPENCODE_DB_PATH_DEFAULT;
   try {
-    state.db = new betterSqlite3(dbPath, { readonly: true });
+    state.db = openSqliteDb(dbPath);
     state.ocDb = createOpenCodeDatabase(state.db);
-  } catch {
-    state.db = undefined;
-    state.ocDb = undefined;
+  } catch (error) {
+    if (isUnavailable(error)) {
+      // Native dep not installed or not built — OpenCode provider silently disabled.
+      state.db = undefined;
+      state.ocDb = undefined;
+      return;
+    }
+    // File permission error, corrupt DB, etc. — propagate to caller.
+    throw error;
   }
+}
+
+function isUnavailable(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const code = hasCode(error) ? error.code : undefined;
+  return code === "MODULE_NOT_FOUND" || code === "ERR_DLOPEN_FAILED";
+}
+
+function hasCode(value: object): value is { code: unknown } {
+  return "code" in value;
+}
+
+function isSqliteCtor(
+  value: unknown,
+): value is (dbPath: string, opts?: { readonly?: boolean }) => SqliteDatabase {
+  return typeof value === "function";
+}
+
+function openSqliteDb(dbPath: string): SqliteDatabase {
+  const loaded: unknown = req("better-sqlite3");
+  if (!isSqliteCtor(loaded)) {
+    throw new Error("better-sqlite3 did not export a usable constructor");
+  }
+  const ctor: (dbPath: string, opts?: { readonly?: boolean }) => SqliteDatabase = loaded;
+  return ctor(dbPath, { readonly: true });
 }
 
 function disconnectState(state: ProviderState, options: OpenCodeOptions): void {
